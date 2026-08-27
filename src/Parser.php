@@ -68,55 +68,7 @@ final class Parser {
 		$declarations = [];
 
 		while ( null === $this->stream->accept( TokenType::FrontmatterEnd ) ) {
-			$keyword = $this->stream->accept( TokenType::Keyword );
-
-			if ( null === $keyword || ! in_array( $keyword->value, [ 'const', 'let' ], true ) ) {
-				throw new SyntaxException( 'Expected `const`/`let` declaration in frontmatter', $this->stream->current()?->line );
-			}
-
-			$line = $keyword->line;
-
-			// Object destructuring: `const { a, b = d } = props;`
-			if ( null !== $this->stream->acceptValue( TokenType::Operator, '{' ) ) {
-				$bindings = [];
-
-				while ( null === $this->stream->acceptValue( TokenType::Operator, '}' ) ) {
-					$name    = $this->stream->expect( TokenType::Identifier )->value;
-					$default = null;
-
-					if ( null !== $this->stream->acceptValue( TokenType::Operator, '=' ) ) {
-						$default = $this->expr->parse();
-					}
-
-					$bindings[] = [ 'name' => $name, 'default' => $default ];
-
-					if ( null !== $this->stream->accept( TokenType::Comma ) ) {
-						continue;
-					}
-
-					$this->stream->expectValue( TokenType::Operator, '}' );
-
-					break;
-				}
-
-				$this->stream->expectValue( TokenType::Operator, '=' );
-				$init = $this->expr->parse();
-				$this->stream->accept( TokenType::Semicolon );
-
-				$declaration = new FrontmatterDestructure( $bindings, $init, $line );
-				$this->sandbox->validateDeclaration( $declaration );
-				$declarations[] = $declaration;
-
-				continue;
-			}
-
-			$name = $this->stream->expect( TokenType::Identifier )->value;
-			$this->stream->expectValue( TokenType::Operator, '=' );
-
-			$expr = $this->expr->parse();
-			$this->stream->accept( TokenType::Semicolon );
-
-			$declaration = new Frontmatter( $name, $expr, $line );
+			$declaration = $this->expr->parseDeclaration();
 			$this->sandbox->validateDeclaration( $declaration );
 			$declarations[] = $declaration;
 		}

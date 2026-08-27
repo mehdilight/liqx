@@ -7,6 +7,7 @@ use Phpmystic\Liqx\Expr;
 use Phpmystic\Liqx\Expr\ArrowFunction;
 use Phpmystic\Liqx\Expr\ArrayLit;
 use Phpmystic\Liqx\Expr\Binary;
+use Phpmystic\Liqx\Expr\BlockBody;
 use Phpmystic\Liqx\Expr\Call;
 use Phpmystic\Liqx\Expr\Conditional;
 use Phpmystic\Liqx\Expr\Filtered;
@@ -18,6 +19,8 @@ use Phpmystic\Liqx\Expr\ObjectLit;
 use Phpmystic\Liqx\Expr\TemplateString;
 use Phpmystic\Liqx\Expr\Unary;
 use Phpmystic\Liqx\Node\Element;
+use Phpmystic\Liqx\Node\Frontmatter;
+use Phpmystic\Liqx\Node\FrontmatterDestructure;
 
 /**
  * Evaluates expression values against a Context. This is the "real JS"
@@ -81,6 +84,10 @@ final class Evaluator {
 
 		if ( $expr instanceof ArrowFunction ) {
 			return $expr;
+		}
+
+		if ( $expr instanceof BlockBody ) {
+			return $this->evalBlockBody( $expr, $ctx );
 		}
 
 		if ( $expr instanceof TemplateString ) {
@@ -251,6 +258,33 @@ final class Evaluator {
 		}
 
 		return $out;
+	}
+
+	private function evalBlockBody( BlockBody $expr, Context $ctx ): mixed {
+		foreach ( $expr->declarations as $declaration ) {
+			if ( $declaration instanceof FrontmatterDestructure ) {
+				$value = $this->evaluate( $declaration->init, $ctx );
+
+				foreach ( $declaration->bindings as $binding ) {
+					if ( is_array( $value ) && array_key_exists( $binding['name'], $value ) ) {
+						$ctx->set( $binding['name'], $value[ $binding['name'] ] );
+
+						continue;
+					}
+
+					$ctx->set(
+						$binding['name'],
+						null !== $binding['default'] ? $this->evaluate( $binding['default'], $ctx ) : null
+					);
+				}
+
+				continue;
+			}
+
+			$ctx->set( $declaration->name, $this->evaluate( $declaration->expr, $ctx ) );
+		}
+
+		return null !== $expr->return ? $this->evaluate( $expr->return, $ctx ) : null;
 	}
 
 	private function evalFiltered( Filtered $expr, Context $ctx ): mixed {

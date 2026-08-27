@@ -63,6 +63,9 @@ final class Lexer {
 	/** Nesting of `{ }` object/block braces within a Js expression. */
 	private int $jsBraceDepth = 0;
 
+	/** Outer brace depths awaiting restore when a `{…}` expression closes. */
+	private array $jsBraceDepthStack = [];
+
 	/** In Js mode: is the next token an operand (vs. postfix)? */
 	private bool $expectOperand = true;
 
@@ -82,6 +85,7 @@ final class Lexer {
 		$this->modeStack = [];
 		$this->tagStack  = [];
 		$this->jsBraceDepth = 0;
+		$this->jsBraceDepthStack = [];
 		$this->expectOperand = true;
 
 		$this->lexFrontmatterOpen();
@@ -217,6 +221,8 @@ final class Lexer {
 			$this->push( TokenType::ExpressionStart, '{', $this->line );
 			$this->cursor++;
 			$this->modeStack[] = LexerMode::Content;
+			$this->jsBraceDepthStack[] = $this->jsBraceDepth;
+			$this->jsBraceDepth = 0;
 			$this->mode        = LexerMode::Js;
 			$this->expectOperand = true;
 
@@ -285,6 +291,8 @@ final class Lexer {
 			$this->push( TokenType::ExpressionStart, '{', $this->line );
 			$this->cursor++;
 			$this->modeStack[] = LexerMode::Tag;
+			$this->jsBraceDepthStack[] = $this->jsBraceDepth;
+			$this->jsBraceDepth = 0;
 			$this->mode        = LexerMode::Js;
 			$this->expectOperand = true;
 
@@ -401,7 +409,8 @@ final class Lexer {
 
 			$this->push( TokenType::ExpressionEnd, '}', $this->line );
 			$this->cursor++;
-			$this->mode = array_pop( $this->modeStack ) ?? LexerMode::Content;
+			$this->jsBraceDepth = array_pop( $this->jsBraceDepthStack ) ?? 0;
+			$this->mode        = array_pop( $this->modeStack ) ?? LexerMode::Content;
 
 			return;
 		}
@@ -478,7 +487,7 @@ final class Lexer {
 				$value,
 				$this->line
 			);
-			$this->expectOperand = false;
+			$this->expectOperand = $this->expectsOperandAfterKeyword( $value );
 
 			return;
 		}
@@ -832,6 +841,13 @@ final class Lexer {
 		$end = strpos( $this->source, "\n", $offset );
 
 		return substr( $this->source, $offset, false === $end ? $this->length - $offset : $end - $offset );
+	}
+
+	private function expectsOperandAfterKeyword( string $keyword ): bool {
+		return in_array( $keyword, [
+			'return', 'typeof', 'new', 'throw', 'void', 'delete',
+			'in', 'instanceof', 'yield', 'await', 'case',
+		], true );
 	}
 
 	private function push( TokenType $type, string $value, int $line ): void {

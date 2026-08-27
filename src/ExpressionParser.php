@@ -7,6 +7,7 @@ use Phpmystic\Liqx\Expr;
 use Phpmystic\Liqx\Expr\ArrowFunction;
 use Phpmystic\Liqx\Expr\ArrayLit;
 use Phpmystic\Liqx\Expr\Binary;
+use Phpmystic\Liqx\Expr\BlockBody;
 use Phpmystic\Liqx\Expr\Call;
 use Phpmystic\Liqx\Expr\Conditional;
 use Phpmystic\Liqx\Expr\Filter;
@@ -20,6 +21,8 @@ use Phpmystic\Liqx\Expr\TemplateString;
 use Phpmystic\Liqx\Expr\Unary;
 use Phpmystic\Liqx\Node;
 use Phpmystic\Liqx\Node\Element;
+use Phpmystic\Liqx\Node\Frontmatter;
+use Phpmystic\Liqx\Node\FrontmatterDestructure;
 use Phpmystic\Liqx\Node\Output;
 use Phpmystic\Liqx\Node\Schema;
 use Phpmystic\Liqx\Node\Script;
@@ -62,9 +65,8 @@ final class ExpressionParser {
 
 		if ( null !== $params ) {
 			$this->stream->expect( TokenType::Arrow );
-			$body = $this->parse();
 
-			return new ArrowFunction( $params, $body );
+			return new ArrowFunction( $params, $this->parseArrowBody() );
 		}
 
 		$this->stream->seek( $save );
@@ -90,6 +92,96 @@ final class ExpressionParser {
 		return [] === $filters ? $value : new Filtered( $value, $filters );
 	}
 
+	/** The arrow body: `{ const …; return …; }` or a plain expression. */
+	private function parseArrowBody(): Expr {
+		if ( null !== $this->stream->acceptValue( TokenType::Operator, '{' ) ) {
+			return $this->parseBlockBody();
+		}
+
+		return $this->parse();
+	}
+
+	/**
+	 * `{ const a = …; const { b } = c; return …; }` — declarations run in the
+	 * arrow's scope, the trailing `return` is its value.
+	 */
+	private function parseBlockBody(): BlockBody {
+		$declarations = [];
+		$return       = null;
+
+		while ( null === $this->stream->acceptValue( TokenType::Operator, '}' ) ) {
+			$token = $this->stream->current();
+
+			if ( null === $token ) {
+				throw new SyntaxException( 'Unterminated block body' );
+			}
+
+			if ( TokenType::Keyword === $token->type && 'return' === $token->value ) {
+				$this->stream->next();
+				$return = $this->parse();
+				$this->stream->accept( TokenType::Semicolon );
+				$this->stream->expectValue( TokenType::Operator, '}' );
+
+				break;
+			}
+
+			$declarations[] = $this->parseDeclaration();
+		}
+
+		return new BlockBody( $declarations, $return );
+	}
+
+	/**
+	 * A `const`/`let` declaration — shared by the frontmatter and arrow block
+	 * bodies. Returns the single binding or the destructuring form.
+	 */
+	public function parseDeclaration(): Frontmatter|FrontmatterDestructure {
+		$keyword = $this->stream->accept( TokenType::Keyword );
+
+		if ( null === $keyword || ! in_array( $keyword->value, [ 'const', 'let' ], true ) ) {
+			throw new SyntaxException( 'Expected `const`/`let` declaration', $this->stream->current()?->line );
+		}
+
+		$line = $keyword->line;
+
+		if ( null !== $this->stream->acceptValue( TokenType::Operator, '{' ) ) {
+			$bindings = [];
+
+			while ( null === $this->stream->acceptValue( TokenType::Operator, '}' ) ) {
+				$name    = $this->stream->expect( TokenType::Identifier )->value;
+				$default = null;
+
+				if ( null !== $this->stream->acceptValue( TokenType::Operator, '=' ) ) {
+					$default = $this->parse();
+				}
+
+				$bindings[] = [ 'name' => $name, 'default' => $default ];
+
+				if ( null !== $this->stream->accept( TokenType::Comma ) ) {
+					continue;
+				}
+
+				$this->stream->expectValue( TokenType::Operator, '}' );
+
+				break;
+			}
+
+			$this->stream->expectValue( TokenType::Operator, '=' );
+			$init = $this->parse();
+			$this->stream->accept( TokenType::Semicolon );
+
+			return new FrontmatterDestructure( $bindings, $init, $line );
+		}
+
+		$name = $this->stream->expect( TokenType::Identifier )->value;
+		$this->stream->expectValue( TokenType::Operator, '=' );
+
+		$expr = $this->parse();
+		$this->stream->accept( TokenType::Semicolon );
+
+		return new Frontmatter( $name, $expr, $line );
+	}
+
 	private function parseConditional(): Expr {
 		$test = $this->parseLogicalOr();
 
@@ -111,9 +203,8 @@ final class ExpressionParser {
 
 		if ( null !== $params ) {
 			$this->stream->expect( TokenType::Arrow );
-			$body = $this->parse();
 
-			return new ArrowFunction( $params, $body );
+			return new ArrowFunction( $params, $this->parseArrowBody() );
 		}
 
 		$this->stream->seek( $save );

@@ -7,6 +7,7 @@ use Phpmystic\Liqx\Expr;
 use Phpmystic\Liqx\Expr\ArrayLit;
 use Phpmystic\Liqx\Expr\ArrowFunction;
 use Phpmystic\Liqx\Expr\Binary;
+use Phpmystic\Liqx\Expr\BlockBody;
 use Phpmystic\Liqx\Expr\Call;
 use Phpmystic\Liqx\Expr\Conditional;
 use Phpmystic\Liqx\Expr\Filtered;
@@ -104,6 +105,18 @@ final class SandboxValidator {
 			}
 
 			$this->validateExpr( $expr->body, arrowsAllowed: false, line: $line );
+
+			return;
+		}
+
+		if ( $expr instanceof BlockBody ) {
+			foreach ( $expr->declarations as $declaration ) {
+				$this->validateDeclaration( $declaration );
+			}
+
+			if ( null !== $expr->return ) {
+				$this->validateExpr( $expr->return, arrowsAllowed: false, line: $line );
+			}
 
 			return;
 		}
