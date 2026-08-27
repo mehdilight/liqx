@@ -118,14 +118,19 @@ final class Evaluator {
 	// ---------------------------------------------------------------------
 
 	private function evalIdentifier( Identifier $expr, Context $ctx ): mixed {
+		return $this->identifier( $ctx, $expr->name );
+	}
+
+	/** Strict-aware identifier lookup — shared by the interpreter and compiled templates. */
+	public function identifier( Context $ctx, string $name ): mixed {
 		if ( ! $ctx->strict ) {
-			return $ctx->get( $expr->name );
+			return $ctx->get( $name );
 		}
 
-		[ 'found' => $found, 'value' => $value ] = $ctx->lookup( $expr->name );
+		[ 'found' => $found, 'value' => $value ] = $ctx->lookup( $name );
 
 		if ( ! $found ) {
-			throw new UndefinedVariableException( sprintf( 'Undefined variable %s', $expr->name ) );
+			throw new UndefinedVariableException( sprintf( 'Undefined variable %s', $name ) );
 		}
 
 		return $value;
@@ -155,26 +160,36 @@ final class Evaluator {
 		}
 
 		if ( $callee instanceof Identifier ) {
-			$entry = $ctx->environment->globalEntry( $callee->name );
-
-			if ( null !== $entry ) {
-				[ $global, $wantsContext ] = $entry;
-
-				return $wantsContext ? $global( $ctx, ...$args ) : $global( ...$args );
-			}
-
-			$filter = $ctx->environment->filter( $callee->name );
-
-			if ( null !== $filter ) {
-				return $filter( ...$args );
-			}
-
-			throw new LiqxException( sprintf( 'Unknown function %s', $callee->name ) );
+			return $this->callNamed( $ctx, $callee->name, $args );
 		}
 
 		$fn = $this->evaluate( $callee, $ctx );
 
 		return $this->invoke( $fn, $args, $ctx );
+	}
+
+	/**
+	 * A `name(...)` call — global first, then filter, mirroring Liquid where
+	 * the distinction is tags vs filters.
+	 *
+	 * @param list<mixed> $args
+	 */
+	public function callNamed( Context $ctx, string $name, array $args ): mixed {
+		$entry = $ctx->environment->globalEntry( $name );
+
+		if ( null !== $entry ) {
+			[ $global, $wantsContext ] = $entry;
+
+			return $wantsContext ? $global( $ctx, ...$args ) : $global( ...$args );
+		}
+
+		$filter = $ctx->environment->filter( $name );
+
+		if ( null !== $filter ) {
+			return $filter( ...$args );
+		}
+
+		throw new LiqxException( sprintf( 'Unknown function %s', $name ) );
 	}
 
 	private function evalBinary( Binary $expr, Context $ctx ): mixed {
@@ -234,13 +249,23 @@ final class Evaluator {
 	}
 
 	private function evalTemplateString( TemplateString $expr, Context $ctx ): string {
+		return $this->templateString(
+			array_map( fn ( string|Expr $part ) => is_string( $part ) ? $part : $this->evaluate( $part, $ctx ), $expr->parts ),
+			$ctx
+		);
+	}
+
+	/**
+	 * Concatenate a template-literal part list. `$parts` mixes literal strings
+	 * with already-evaluated values.
+	 *
+	 * @param list<string|mixed> $parts
+	 */
+	public function templateString( array $parts, Context $ctx ): string {
 		$out = '';
-		foreach ( $expr->parts as $part ) {
-			if ( is_string( $part ) ) {
-				$out .= $part;
-			} else {
-				$out .= $this->renderer->renderValue( $this->evaluate( $part, $ctx ), $ctx );
-			}
+
+		foreach ( $parts as $part ) {
+			$out .= is_string( $part ) ? $part : $this->renderer->renderValue( $part, $ctx );
 		}
 
 		return $out;
@@ -277,15 +302,29 @@ final class Evaluator {
 
 	private function evalFiltered( Filtered $expr, Context $ctx ): mixed {
 		$value = $this->evaluate( $expr->value, $ctx );
+		$pipeline = [];
 
 		foreach ( $expr->filters as $filter ) {
-			$callable = $ctx->environment->filter( $filter->name );
+			$pipeline[] = [ $filter->name, array_map( fn ( Expr $a ) => $this->evaluate( $a, $ctx ), $filter->args ) ];
+		}
+
+		return $this->filtered( $value, $pipeline, $ctx );
+	}
+
+	/**
+	 * Apply a pipeline of `[$name, $args]` filters to a value. Shared by the
+	 * interpreter and compiled templates.
+	 *
+	 * @param list<array{0:string, 1:list<mixed>}> $pipeline
+	 */
+	public function filtered( mixed $value, array $pipeline, Context $ctx ): mixed {
+		foreach ( $pipeline as [ $name, $args ] ) {
+			$callable = $ctx->environment->filter( $name );
 
 			if ( null === $callable ) {
-				throw new UnknownFilterException( sprintf( 'Unknown filter %s', $filter->name ) );
+				throw new UnknownFilterException( sprintf( 'Unknown filter %s', $name ) );
 			}
 
-			$args = array_map( fn ( Expr $a ) => $this->evaluate( $a, $ctx ), $filter->args );
 			$value = $callable( $value, ...$args );
 		}
 
@@ -296,8 +335,10 @@ final class Evaluator {
 	// Method dispatch
 	// ---------------------------------------------------------------------
 
-	/** @param list<mixed> $args */
-	private function methodCall( mixed $object, string $method, array $args, Context $ctx ): mixed {
+	/**
+	 * @param list<mixed> $args
+	 */
+	public function methodCall( mixed $object, string $method, array $args, Context $ctx ): mixed {
 		// Lenient on nothing — Liquid's `{% for line in nil %}` is an empty
 		// loop, and themes write `{collection.products.map(...)}` where the
 		// collection may be absent.
@@ -419,7 +460,7 @@ final class Evaluator {
 		return false === $index ? -1 : (int) $index;
 	}
 
-	private function asCallback( mixed $callback, Context $ctx ): callable {
+	public function asCallback( mixed $callback, Context $ctx ): callable {
 		if ( $callback instanceof ArrowFunction ) {
 			return fn ( mixed ...$args ) => $this->invoke( $callback, $args, $ctx );
 		}
@@ -432,7 +473,7 @@ final class Evaluator {
 	}
 
 	/** @param list<mixed> $args */
-	private function invoke( mixed $fn, array $args, Context $ctx ): mixed {
+	public function invoke( mixed $fn, array $args, Context $ctx ): mixed {
 		if ( $fn instanceof ArrowFunction ) {
 			$scope = [];
 			foreach ( $fn->params as $i => $param ) {
@@ -477,7 +518,7 @@ final class Evaluator {
 		return [ 'found' => false, 'value' => null ];
 	}
 
-	private function getProperty( mixed $object, mixed $key ): mixed {
+	public function getProperty( mixed $object, mixed $key ): mixed {
 		if ( is_array( $object ) ) {
 			if ( 'length' === $key ) {
 				return count( $object );
@@ -522,7 +563,7 @@ final class Evaluator {
 		return null;
 	}
 
-	private function truthy( mixed $value ): bool {
+	public function truthy( mixed $value ): bool {
 		if ( null === $value || false === $value ) {
 			return false;
 		}
@@ -534,7 +575,7 @@ final class Evaluator {
 		return true;
 	}
 
-	private function toNumber( mixed $value ): int|float {
+	public function toNumber( mixed $value ): int|float {
 		if ( is_bool( $value ) ) {
 			return $value ? 1 : 0;
 		}
@@ -550,7 +591,7 @@ final class Evaluator {
 		return 0;
 	}
 
-	private function compare( mixed $left, mixed $right ): int {
+	public function compare( mixed $left, mixed $right ): int {
 		if ( is_numeric( $left ) && is_numeric( $right ) ) {
 			return $this->toNumber( $left ) <=> $this->toNumber( $right );
 		}
@@ -558,7 +599,7 @@ final class Evaluator {
 		return (string) $left <=> (string) $right;
 	}
 
-	private function looseEqual( mixed $left, mixed $right ): bool {
+	public function looseEqual( mixed $left, mixed $right ): bool {
 		if ( $left === $right ) {
 			return true;
 		}
@@ -580,6 +621,60 @@ final class Evaluator {
 		}
 
 		return $left == $right;
+	}
+
+	/**
+	 * Build one `name="value"` attribute from a value, honoring Liqx's
+	 * attribute rules: `true` → bare attribute, `false`/`null` → dropped.
+	 */
+	public function attribute( string $name, mixed $value ): string {
+		if ( true === $value ) {
+			return ' ' . $name;
+		}
+
+		if ( false === $value || null === $value ) {
+			return '';
+		}
+
+		return ' ' . $name . '="' . $this->stringify( $value ) . '"';
+	}
+
+	/** Spread `{...attrs}` — only arrays spread, and `key` is skipped. */
+	public function spreadAttrs( mixed $value ): string {
+		$out = '';
+
+		if ( is_array( $value ) ) {
+			foreach ( $value as $name => $v ) {
+				if ( 'key' === $name ) {
+					continue;
+				}
+
+				$out .= ' ' . $name . '="' . $this->stringify( $v ) . '"';
+			}
+		}
+
+		return $out;
+	}
+
+	public function stringify( mixed $value ): string {
+		if ( null === $value || false === $value ) {
+			return '';
+		}
+
+		if ( true === $value ) {
+			return 'true';
+		}
+
+		if ( is_array( $value ) ) {
+			return implode( ' ', array_map( fn ( $v ) => $this->stringify( $v ), $value ) );
+		}
+
+		return (string) $value;
+	}
+
+	/** Rendering an output value to markup — mirrors Renderer::renderValue. */
+	public function renderValue( mixed $value, Context $ctx ): string {
+		return $this->renderer->renderValue( $value, $ctx );
 	}
 
 	/**

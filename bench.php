@@ -11,6 +11,19 @@ $env->registerFilter('money', fn($v) => number_format((float)$v, 2) . ' MAD');
 $env->registerFilter('t', fn($v) => (string)$v);
 $env->registerFilter('default', fn($v, $d) => $v ?? $d);
 
+// Compiled path: Template renders lower the AST to native PHP closures,
+// cached as .php files so OPcache serves them from shared memory.
+$cacheDir = sys_get_temp_dir() . '/liqx-bench-cache';
+if (!is_dir($cacheDir)) mkdir($cacheDir, 0777, true);
+
+$envCompiled = Environment::create();
+$envCompiled->registerFilter('money', fn($v) => number_format((float)$v, 2) . ' MAD');
+$envCompiled->registerFilter('t', fn($v) => (string)$v);
+$envCompiled->registerFilter('default', fn($v, $d) => $v ?? $d);
+$envCompiled->setCompiledTemplateDir($cacheDir);
+
+foreach (glob($cacheDir . '/*.php') ?: [] as $f) unlink($f);
+
 // 1. Template with template literals inside loops
 $templateLoopSource = <<<'LIQX'
 <div class="products">
@@ -95,6 +108,17 @@ for ($i = 0; $i < 50; $i++) {
     $tComplex->render($complexData);
 }
 
+// Compiled (first render also compiles+writes the .php cache files).
+$cLoop = Template::parse($templateLoopSource, $envCompiled);
+$cVerbatim = Template::parse($templateVerbatimSource, $envCompiled);
+$cComplex = Template::parse($templateComplexSource, $envCompiled);
+
+for ($i = 0; $i < 50; $i++) {
+    $cLoop->render(['items' => $items]);
+    $cVerbatim->render($verbatimData);
+    $cComplex->render($complexData);
+}
+
 function measure(string $name, callable $fn, int $iterations): void {
     $startTime = hrtime(true);
     for ($i = 0; $i < $iterations; $i++) {
@@ -114,4 +138,11 @@ measure("3. Parse Verbatim Template", fn() => Template::parse($templateVerbatimS
 measure("4. Render Verbatim Template", fn() => $tVerbatim->render($verbatimData), 1000);
 measure("5. Parse Complex Section", fn() => Template::parse($templateComplexSource, $env), 1000);
 measure("6. Render Complex Section", fn() => $tComplex->render($complexData), 1000);
+echo "--- compiled path ---\n";
+measure("7. Compiled Render Loop (50 items)", fn() => $cLoop->render(['items' => $items]), 1000);
+measure("8. Compiled Render Verbatim", fn() => $cVerbatim->render($verbatimData), 1000);
+measure("9. Compiled Render Complex", fn() => $cComplex->render($complexData), 1000);
+echo "--- full request (end-to-end) ---\n";
+measure("10. Interpreter parse+render Loop", fn() => Template::parse($templateLoopSource, $env)->render(['items' => $items]), 1000);
+measure("11. Compiled warm-cache render Loop", fn() => Template::parse($templateLoopSource, $envCompiled)->render(['items' => $items]), 1000);
 echo "====================================\n";
