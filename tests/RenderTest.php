@@ -316,4 +316,12 @@ LQX;
 	public function testLenientModeRendersUndefinedEmpty(): void {
 		$this->assertSame( '<p></p>', $this->render( '<p>{missing}</p>', [] ) );
 	}
+
+	public function testSelfClosingVoidAndNonVoidElements(): void {
+		$this->assertSame( '<img src="/test.jpg" />', $this->render( '<img src="/test.jpg" />' ) );
+		$this->assertSame( '<input type="text" name="foo" />', $this->render( '<input type="text" name="foo" />' ) );
+		$this->assertSame( '<textarea name="content" rows="4"></textarea>', $this->render( '<textarea name="content" rows="4" />' ) );
+		$this->assertSame( '<div class="divider"></div>', $this->render( '<div class="divider" />' ) );
+		$this->assertSame( '<span></span>', $this->render( '<span />' ) );
+	}
 }

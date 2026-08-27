@@ -20,6 +20,29 @@ use Phpmystic\Liqx\Node\Text;
  */
 final class Renderer {
 
+	/**
+	 * HTML void elements that must not have closing tags.
+	 * All other elements written in self-closing JSX style will emit <tag></tag>.
+	 *
+	 * @var array<string, bool>
+	 */
+	private const VOID_ELEMENTS = [
+		'area'    => true,
+		'base'    => true,
+		'br'      => true,
+		'col'     => true,
+		'embed'   => true,
+		'hr'      => true,
+		'img'     => true,
+		'input'   => true,
+		'link'    => true,
+		'meta'    => true,
+		'param'   => true,
+		'source'  => true,
+		'track'   => true,
+		'wbr'     => true,
+	];
+
 	private Evaluator $evaluator;
 
 	public function __construct() {
@@ -157,7 +180,11 @@ if ( $node instanceof Style ) {
 			}
 
 			if ( $element->selfClosing ) {
-				return '<' . $element->tag . $attributes . ' />';
+				if ( isset( self::VOID_ELEMENTS[ strtolower( $element->tag ) ] ) ) {
+					return '<' . $element->tag . $attributes . ' />';
+				}
+
+				return '<' . $element->tag . $attributes . '></' . $element->tag . '>';
 			}
 
 			$children = '';
