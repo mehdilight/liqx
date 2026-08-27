@@ -103,14 +103,27 @@ final class RenderTest extends TestCase {
 	public function testStyleBlockRendersWithInterpolation(): void {
 		$source = '<style>.hero--{section.id} { background: {settings.bg_color}; }</style>';
 		$this->assertSame(
-			'.hero--hero-1 { background: #fff; }',
+			'<style>.hero--hero-1 { background: #fff; }</style>',
 			$this->render( $source, [ 'section' => [ 'id' => 'hero-1' ], 'settings' => [ 'bg_color' => '#fff' ] ] )
 		);
 	}
 
 	public function testStyleBlocksRenderInPlaceAndDoNotCollapse(): void {
 		$source = '<style>.a{color:red}</style><p>x</p><style>.b{color:blue}</style>';
-		$this->assertSame( '.a{color:red}<p>x</p>.b{color:blue}', $this->render( $source ) );
+		$this->assertSame( '<style>.a{color:red}</style><p>x</p><style>.b{color:blue}</style>', $this->render( $source ) );
+	}
+
+	public function testScriptBlockInterpolatesButKeepsJsObjectsLiteral(): void {
+		$source = '<script>window.routes = { cart: \'x\' }; var url = \'{routes.cart_url}\';</script>';
+		$this->assertSame(
+			"<script>window.routes = { cart: 'x' }; var url = '/cart';</script>",
+			$this->render( $source, [ 'routes' => [ 'cart_url' => '/cart' ] ] )
+		);
+	}
+
+	public function testScriptBlockKeepsJsObjectWithSemicolonsLiteral(): void {
+		$source = '<script>if (a) { b(); }</script>';
+		$this->assertSame( '<script>if (a) { b(); }</script>', $this->render( $source ) );
 	}
 
 	public function testDocumentExposesLastStyleBlock(): void {

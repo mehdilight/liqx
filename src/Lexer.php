@@ -106,6 +106,9 @@ final class Lexer {
 				case LexerMode::Style:
 					$this->lexVerbatimBlock( 'style', TokenType::Style, LexerMode::Style );
 					break;
+				case LexerMode::Script:
+					$this->lexVerbatimBlock( 'script', TokenType::Script, LexerMode::Script );
+					break;
 				case LexerMode::Schema:
 					$this->lexVerbatimBlock( 'schema', TokenType::Schema, LexerMode::Schema );
 					break;
@@ -118,6 +121,10 @@ final class Lexer {
 
 		if ( LexerMode::Style === $this->mode ) {
 			throw SyntaxException::tagNeverClosed( 'style', $this->line );
+		}
+
+		if ( LexerMode::Script === $this->mode ) {
+			throw SyntaxException::tagNeverClosed( 'script', $this->line );
 		}
 
 		if ( LexerMode::Schema === $this->mode ) {
@@ -315,9 +322,13 @@ final class Lexer {
 		$name = $this->currentTagName;
 		$this->currentTagName = '';
 
-		// Verbatim block capture for <style> / <schema>.
-		if ( 'style' === $name || 'schema' === $name ) {
-			$this->mode = 'style' === $name ? LexerMode::Style : LexerMode::Schema;
+		// Verbatim block capture for <style> / <script> / <schema>.
+		if ( 'style' === $name || 'script' === $name || 'schema' === $name ) {
+			$this->mode = match ( $name ) {
+				'style'  => LexerMode::Style,
+				'script' => LexerMode::Script,
+				default  => LexerMode::Schema,
+			};
 
 			return;
 		}

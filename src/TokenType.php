@@ -49,6 +49,7 @@ enum TokenType: string {
 
 	// --- verbatim blocks -----------------------------------------------------
 	case Style  = 'style';
+	case Script = 'script';
 	case Schema = 'schema';
 
 	case EOF = 'eof';

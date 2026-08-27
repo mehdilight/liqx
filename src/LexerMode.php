@@ -16,5 +16,6 @@ enum LexerMode: string {
 	case Js          = 'js';
 	case Frontmatter = 'frontmatter';
 	case Style       = 'style';
+	case Script      = 'script';
 	case Schema      = 'schema';
 }

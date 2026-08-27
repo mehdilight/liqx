@@ -9,6 +9,7 @@ use Phpmystic\Liqx\Node\Element;
 use Phpmystic\Liqx\Node\Frontmatter;
 use Phpmystic\Liqx\Node\FrontmatterDestructure;
 use Phpmystic\Liqx\Node\Output;
+use Phpmystic\Liqx\Node\Script;
 use Phpmystic\Liqx\Node\Style;
 use Phpmystic\Liqx\Node\Text;
 
@@ -74,7 +75,11 @@ final class Renderer {
 		}
 
 		if ( $node instanceof Style ) {
-			return $this->renderStyle( $node, $ctx );
+			return '<style>' . $this->renderVerbatim( $node->body, $ctx ) . '</style>';
+		}
+
+		if ( $node instanceof Script ) {
+			return '<script>' . $this->renderVerbatim( $node->body, $ctx ) . '</script>';
 		}
 
 		if ( $node instanceof Output ) {
@@ -198,17 +203,13 @@ final class Renderer {
 		}
 	}
 
-	private function renderStyle( Style $style, Context $ctx ): string {
-		return $this->interpolateStyle( $style->body, $ctx );
-	}
-
 	/**
-	 * Interpolate `{…}` in a style body. A brace group whose content has no
-	 * top-level `:` or `;` is an expression and is evaluated; otherwise it is
-	 * CSS syntax (`{ background: … }`), kept verbatim but scanned recursively
-	 * so nested `{expr}` interpolations still apply.
+	 * A `<style>` / `<script>` body: `{…}` groups whose content has no
+	 * top-level `:` or `;` are expressions and get evaluated; otherwise they
+	 * are literal (CSS declarations, JS objects/blocks), kept verbatim but
+	 * scanned recursively so nested `{expr}` interpolations still apply.
 	 */
-	private function interpolateStyle( string $body, Context $ctx ): string {
+	private function renderVerbatim( string $body, Context $ctx ): string {
 		$out = '';
 		$i   = 0;
 		$len = strlen( $body );
@@ -229,7 +230,7 @@ final class Renderer {
 			if ( $this->isExpression( $inner ) ) {
 				$out .= $this->renderValue( $this->evaluator->evaluateString( $inner, $ctx ), $ctx );
 			} else {
-				$out .= '{' . $this->interpolateStyle( $inner, $ctx ) . '}';
+				$out .= '{' . $this->renderVerbatim( $inner, $ctx ) . '}';
 			}
 
 			$i = $end;

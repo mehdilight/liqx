@@ -22,6 +22,7 @@ use Phpmystic\Liqx\Node;
 use Phpmystic\Liqx\Node\Element;
 use Phpmystic\Liqx\Node\Output;
 use Phpmystic\Liqx\Node\Schema;
+use Phpmystic\Liqx\Node\Script;
 use Phpmystic\Liqx\Node\Style;
 use Phpmystic\Liqx\Node\Text;
 
@@ -572,7 +573,7 @@ final class ExpressionParser {
 		$peek = $this->stream->peek();
 
 		if ( null !== $peek && TokenType::Identifier === $peek->type
-			&& in_array( $peek->value, [ 'style', 'schema' ], true ) ) {
+			&& in_array( $peek->value, [ 'style', 'script', 'schema' ], true ) ) {
 			$this->stream->next(); // OpenTag
 			$name = $this->stream->next()->value;
 			$this->stream->expect( TokenType::TagEnd );
@@ -583,9 +584,11 @@ final class ExpressionParser {
 				throw SyntaxException::tagNeverClosed( $name, $peek->line );
 			}
 
-			return 'style' === $name
-				? new Style( $block->value )
-				: new Schema( $block->value );
+			return match ( $name ) {
+				'style'  => new Style( $block->value ),
+				'script' => new Script( $block->value ),
+				default  => new Schema( $block->value ),
+			};
 		}
 
 		return $this->parseElement();
