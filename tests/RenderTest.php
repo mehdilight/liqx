@@ -324,4 +324,16 @@ LQX;
 		$this->assertSame( '<div class="divider"></div>', $this->render( '<div class="divider" />' ) );
 		$this->assertSame( '<span></span>', $this->render( '<span />' ) );
 	}
+
+	public function testTemplateStringAndVerbatimInterpolation(): void {
+		$source = '<div><p>{`${name} has ${items.length} items`}</p><style>.box { color: {theme.color}; padding: 10px; }</style></div>';
+		$rendered = $this->render( $source, [
+			'name' => 'Alice',
+			'items' => [ 1, 2, 3 ],
+			'theme' => [ 'color' => '#f00' ],
+		] );
+
+		$this->assertStringContainsString( '<p>Alice has 3 items</p>', $rendered );
+		$this->assertStringContainsString( '<style>.box { color: #f00; padding: 10px; }</style>', $rendered );
+	}
 }

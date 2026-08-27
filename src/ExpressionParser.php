@@ -371,7 +371,7 @@ final class ExpressionParser {
 		return match ( $token->type ) {
 			TokenType::String         => new Literal( $this->stream->next()->value ),
 			TokenType::Number         => new Literal( $this->coerceNumber( $this->stream->next()->value ) ),
-			TokenType::TemplateString => new TemplateString( $this->stream->next()->value ),
+			TokenType::TemplateString => $this->parseTemplateString(),
 			TokenType::Identifier     => $this->parseIdentifier(),
 			TokenType::OpenParen      => $this->parseParenthesized(),
 			TokenType::OpenBracket    => $this->parseArray(),
@@ -399,6 +399,59 @@ final class ExpressionParser {
 		$this->stream->expect( TokenType::CloseParen );
 
 		return $inner;
+	}
+
+	private function parseTemplateString(): TemplateString {
+		$raw   = $this->stream->next()->value;
+		$parts = $this->parseTemplateParts( $raw );
+
+		return new TemplateString( $raw, $parts );
+	}
+
+	/**
+	 * @return list<string|Expr>
+	 */
+	private function parseTemplateParts( string $raw ): array {
+		$content = substr( $raw, 1, -1 ); // strip surrounding backticks
+		$parts   = [];
+		$len     = strlen( $content );
+		$i       = 0;
+
+		while ( $i < $len ) {
+			$start = strpos( $content, '${', $i );
+
+			if ( false === $start ) {
+				$parts[] = substr( $content, $i, $len - $i );
+
+				break;
+			}
+
+			if ( $start > $i ) {
+				$parts[] = substr( $content, $i, $start - $i );
+			}
+
+			$depth = 1;
+			$j     = $start + 2;
+
+			while ( $j < $len && $depth > 0 ) {
+				if ( '{' === $content[ $j ] ) {
+					$depth++;
+				} elseif ( '}' === $content[ $j ] ) {
+					$depth--;
+				}
+
+				$j++;
+			}
+
+			$inner   = substr( $content, $start + 2, $j - $start - 3 );
+			$stream  = ( new Lexer() )->tokenize( '{' . $inner . '}' );
+			$stream->next(); // ExpressionStart
+			$parts[] = ( new self( $stream ) )->parse();
+
+			$i = $j;
+		}
+
+		return $parts;
 	}
 
 	private function parseArray(): Expr {
@@ -720,7 +773,7 @@ final class ExpressionParser {
 						}
 					}
 
-					$attrs[] = [ 'name' => $attrName, 'value' => $value ];
+					$attrs[] = [ 'name' => $attrName, 'value' => $value, 'spread' => false ];
 
 					continue;
 				}
@@ -751,9 +804,6 @@ final class ExpressionParser {
 	}
 
 	/**
-	 * @param list<array{name:string, value:Expr|null}> $attrs
-	 */
-	/**
 	 * If the next token is a verbatim body (Style/Script), consume it and
 	 * return the node; used by both document and expression element parsing.
 	 *
@@ -771,17 +821,120 @@ final class ExpressionParser {
 		}
 
 		$this->stream->next();
+		$parts = $this->parseVerbatimParts( $token->value );
 
 		return 'style' === $tag
-			? new Style( $token->value, $attrs )
-			: new Script( $token->value, $attrs );
+			? new Style( $token->value, $attrs, $parts )
+			: new Script( $token->value, $attrs, $parts );
 	}
 
-	private function verbatimNode( string $name, string $body, array $attrs, int $line ): Node {
-		return match ( $name ) {
-			'style'  => new Style( $body, $attrs ),
-			'script' => new Script( $body, $attrs ),
-			default  => new Schema( $body ),
-		};
+	/**
+	 * @return list<string|Expr>
+	 */
+	private function parseVerbatimParts( string $body ): array {
+		$parts = [];
+		$i     = 0;
+		$len   = strlen( $body );
+
+		while ( $i < $len ) {
+			$start = strpos( $body, '{', $i );
+
+			if ( false === $start ) {
+				$parts[] = substr( $body, $i, $len - $i );
+
+				break;
+			}
+
+			if ( $start > $i ) {
+				$parts[] = substr( $body, $i, $start - $i );
+			}
+
+			[ $end, $inner ] = $this->matchingBrace( $body, $start );
+
+			if ( $this->isVerbatimExpression( $inner ) ) {
+				$stream  = ( new Lexer() )->tokenize( '{' . $inner . '}' );
+				$stream->next(); // ExpressionStart
+				$parts[] = ( new self( $stream ) )->parse();
+			} else {
+				$nestedParts = $this->parseVerbatimParts( $inner );
+				$parts[]     = '{';
+				foreach ( $nestedParts as $np ) {
+					$parts[] = $np;
+				}
+				$parts[] = '}';
+			}
+
+			$i = $end;
+		}
+
+		return $parts;
+	}
+
+	/** @return array{0:int, 1:string} */
+	private function matchingBrace( string $body, int $start ): array {
+		$depth = 1;
+		$j     = $start + 1;
+		$len   = strlen( $body );
+
+		while ( $j < $len && $depth > 0 ) {
+			if ( '{' === $body[ $j ] ) {
+				$depth++;
+			} elseif ( '}' === $body[ $j ] ) {
+				$depth--;
+			}
+
+			$j++;
+		}
+
+		return [ $j, substr( $body, $start + 1, $j - $start - 2 ) ];
+	}
+
+	private function isVerbatimExpression( string $content ): bool {
+		$content = trim( $content );
+
+		if ( '' === $content ) {
+			return false;
+		}
+
+		$depth = 0;
+		$quote = null;
+
+		for ( $i = 0, $len = strlen( $content ); $i < $len; $i++ ) {
+			$char = $content[ $i ];
+
+			if ( null !== $quote ) {
+				if ( '\\' === $char ) {
+					$i++;
+				} elseif ( $char === $quote ) {
+					$quote = null;
+				}
+
+				continue;
+			}
+
+			if ( "'" === $char || '"' === $char || '`' === $char ) {
+				$quote = $char;
+
+				continue;
+			}
+
+			if ( in_array( $char, [ '(', '[', '{' ], true ) ) {
+				$depth++;
+
+				continue;
+			}
+
+			if ( in_array( $char, [ ')', ']', '}' ], true ) ) {
+				$depth--;
+
+				continue;
+			}
+
+			if ( 0 === $depth && ( ':' === $char || ';' === $char ) ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 }

@@ -8,9 +8,13 @@ use Phpmystic\Liqx\Node;
 
 final class Style implements Node, Expr {
 
-	/** @param list<array{name:string, value:Expr|null}> $attrs */
+	/**
+	 * @param list<array{name:string|null, value:Expr|null, spread:bool}> $attrs
+	 * @param list<string|Expr> $parts
+	 */
 	public function __construct(
 		public readonly string $body,
 		public readonly array $attrs = [],
+		public readonly array $parts = [],
 	) {}
 }

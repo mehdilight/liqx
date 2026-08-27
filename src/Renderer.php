@@ -99,12 +99,8 @@ final class Renderer {
 			return $node->value;
 		}
 
-if ( $node instanceof Style ) {
-			return $this->renderStyle( $node, $ctx );
-		}
-
-		if ( $node instanceof Script ) {
-			return $this->renderScript( $node, $ctx );
+		if ( $node instanceof Element ) {
+			return $this->renderElement( $node, $ctx );
 		}
 
 		if ( $node instanceof Output ) {
@@ -117,8 +113,12 @@ if ( $node instanceof Style ) {
 			}
 		}
 
-		if ( $node instanceof Element ) {
-			return $this->renderElement( $node, $ctx );
+		if ( $node instanceof Style ) {
+			return $this->renderStyle( $node, $ctx );
+		}
+
+		if ( $node instanceof Script ) {
+			return $this->renderScript( $node, $ctx );
 		}
 
 		return '';
@@ -233,15 +233,15 @@ if ( $node instanceof Style ) {
 	}
 
 	public function renderStyle( Style $node, Context $ctx ): string {
-		return '<style>' . $this->renderVerbatim( $node->body, $ctx ) . '</style>';
+		return '<style>' . $this->renderVerbatimParts( $node->parts, $node->body, $ctx ) . '</style>';
 	}
 
 	public function renderScript( Script $node, Context $ctx ): string {
-		return '<script' . $this->renderAttrs( $node->attrs, $ctx ) . '>' . $this->renderVerbatim( $node->body, $ctx ) . '</script>';
+		return '<script' . $this->renderAttrs( $node->attrs, $ctx ) . '>' . $this->renderVerbatimParts( $node->parts, $node->body, $ctx ) . '</script>';
 	}
 
 	/**
-	 * @param list<array{name:string, value:Expr|null}> $attrs
+	 * @param list<array{name:string|null, value:Expr|null, spread:bool}> $attrs
 	 */
 	private function renderAttrs( array $attrs, Context $ctx ): string {
 		$out = '';
@@ -272,105 +272,24 @@ if ( $node instanceof Style ) {
 	}
 
 	/**
-	 * A `<style>` / `<script>` body: `{…}` groups whose content has no
-	 * top-level `:` or `;` are expressions and get evaluated; otherwise they
-	 * are literal (CSS declarations, JS objects/blocks), kept verbatim but
-	 * scanned recursively so nested `{expr}` interpolations still apply.
+	 * @param list<string|Expr> $parts
 	 */
-	private function renderVerbatim( string $body, Context $ctx ): string {
+	private function renderVerbatimParts( array $parts, string $fallbackBody, Context $ctx ): string {
+		if ( [] === $parts ) {
+			return $fallbackBody;
+		}
+
 		$out = '';
-		$i   = 0;
-		$len = strlen( $body );
 
-		while ( $i < $len ) {
-			$start = strpos( $body, '{', $i );
-
-			if ( false === $start ) {
-				$out .= substr( $body, $i, $len - $i );
-
-				break;
-			}
-
-			$out .= substr( $body, $i, $start - $i );
-
-			[ $end, $inner ] = $this->matchingBrace( $body, $start );
-
-			if ( $this->isExpression( $inner ) ) {
-				$out .= $this->renderValue( $this->evaluator->evaluateString( $inner, $ctx ), $ctx );
+		foreach ( $parts as $part ) {
+			if ( is_string( $part ) ) {
+				$out .= $part;
 			} else {
-				$out .= '{' . $this->renderVerbatim( $inner, $ctx ) . '}';
+				$out .= $this->renderValue( $this->evaluator->evaluate( $part, $ctx ), $ctx );
 			}
-
-			$i = $end;
 		}
 
 		return $out;
-	}
-
-	/** @return array{0:int, 1:string} matching-brace index and inner content */
-	private function matchingBrace( string $body, int $start ): array {
-		$depth = 1;
-		$j     = $start + 1;
-		$len   = strlen( $body );
-
-		while ( $j < $len && $depth > 0 ) {
-			if ( '{' === $body[ $j ] ) {
-				$depth++;
-			} elseif ( '}' === $body[ $j ] ) {
-				$depth--;
-			}
-
-			$j++;
-		}
-
-		return [ $j, substr( $body, $start + 1, $j - $start - 2 ) ];
-	}
-
-	/**
-	 * A `{…}` in a `<style>` block is an interpolation only when its content is
-	 * a plausible expression — i.e. it has no top-level `:` or `;`, which would
-	 * mark it as a CSS declaration/block instead.
-	 */
-	private function isExpression( string $content ): bool {
-		$content = trim( $content );
-
-		if ( '' === $content ) {
-			return false;
-		}
-
-		$depth = 0;
-		$quote = null;
-
-		for ( $i = 0, $len = strlen( $content ); $i < $len; $i++ ) {
-			$char = $content[ $i ];
-
-			// Inside a string/template literal, `:`/`;` belong to the literal.
-			if ( null !== $quote ) {
-				if ( '\\' === $char ) {
-					$i++;
-				} elseif ( $char === $quote ) {
-					$quote = null;
-				}
-
-				continue;
-			}
-
-			if ( "'" === $char || '"' === $char || '`' === $char ) {
-				$quote = $char;
-
-				continue;
-			}
-
-			if ( in_array( $char, [ '(', '[', '{' ], true ) ) {
-				$depth++;
-			} elseif ( in_array( $char, [ ')', ']', '}' ], true ) ) {
-				$depth--;
-			} elseif ( 0 === $depth && ( ':' === $char || ';' === $char ) ) {
-				return false;
-			}
-		}
-
-		return true;
 	}
 
 	private function stringify( mixed $value ): string {

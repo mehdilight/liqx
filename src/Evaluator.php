@@ -118,9 +118,13 @@ final class Evaluator {
 	// ---------------------------------------------------------------------
 
 	private function evalIdentifier( Identifier $expr, Context $ctx ): mixed {
+		if ( ! $ctx->strict ) {
+			return $ctx->get( $expr->name );
+		}
+
 		[ 'found' => $found, 'value' => $value ] = $ctx->lookup( $expr->name );
 
-		if ( ! $found && $ctx->strict ) {
+		if ( ! $found ) {
 			throw new UndefinedVariableException( sprintf( 'Undefined variable %s', $expr->name ) );
 		}
 
@@ -230,39 +234,13 @@ final class Evaluator {
 	}
 
 	private function evalTemplateString( TemplateString $expr, Context $ctx ): string {
-		$raw = substr( $expr->raw, 1, -1 ); // strip surrounding backticks
 		$out = '';
-		$len = strlen( $raw );
-		$i   = 0;
-
-		while ( $i < $len ) {
-			$start = strpos( $raw, '${', $i );
-
-			if ( false === $start ) {
-				$out .= substr( $raw, $i, $len - $i );
-
-				break;
+		foreach ( $expr->parts as $part ) {
+			if ( is_string( $part ) ) {
+				$out .= $part;
+			} else {
+				$out .= $this->renderer->renderValue( $this->evaluate( $part, $ctx ), $ctx );
 			}
-
-			$out .= substr( $raw, $i, $start - $i );
-
-			$depth = 1;
-			$j     = $start + 2;
-
-			while ( $j < $len && $depth > 0 ) {
-				if ( '{' === $raw[ $j ] ) {
-					$depth++;
-				} elseif ( '}' === $raw[ $j ] ) {
-					$depth--;
-				}
-
-				$j++;
-			}
-
-			$inner = substr( $raw, $start + 2, $j - $start - 3 );
-			$out  .= $this->renderer->renderValue( $this->evaluateString( $inner, $ctx ), $ctx );
-
-			$i = $j;
 		}
 
 		return $out;
@@ -500,11 +478,15 @@ final class Evaluator {
 	}
 
 	private function getProperty( mixed $object, mixed $key ): mixed {
-		if ( 'length' === $key ) {
-			if ( is_array( $object ) ) {
+		if ( is_array( $object ) ) {
+			if ( 'length' === $key ) {
 				return count( $object );
 			}
 
+			return $object[ $key ] ?? null;
+		}
+
+		if ( 'length' === $key ) {
 			if ( is_string( $object ) ) {
 				return mb_strlen( $object );
 			}
@@ -515,25 +497,25 @@ final class Evaluator {
 			}
 		}
 
-		if ( is_array( $object ) ) {
-			return $object[ $key ] ?? null;
-		}
-
-		if ( $object instanceof \ArrayAccess ) {
-			return $object->offsetExists( $key ) ? $object[ $key ] : null;
-		}
-
 		if ( is_object( $object ) ) {
-			// Public properties only — a private/protected one must answer via
-			// beforeMethod (drops resolve everything that way).
-			if ( array_key_exists( (string) $key, get_object_vars( $object ) ) ) {
+			if ( $object instanceof Drop ) {
+				return $object->beforeMethod( (string) $key );
+			}
+
+			if ( method_exists( $object, 'beforeMethod' ) ) {
+				return $object->beforeMethod( (string) $key );
+			}
+
+			if ( isset( $object->{ (string) $key } ) ) {
 				return $object->{ (string) $key };
 			}
 
-			// Duck-typed: hosts bring their own Drop base classes (Sworen's
-			// does), so any object answering `beforeMethod` counts.
-			if ( $object instanceof Drop || method_exists( $object, 'beforeMethod' ) ) {
-				return $object->beforeMethod( (string) $key );
+			if ( $object instanceof \ArrayAccess ) {
+				return $object->offsetExists( $key ) ? $object[ $key ] : null;
+			}
+
+			if ( array_key_exists( (string) $key, get_object_vars( $object ) ) ) {
+				return $object->{ (string) $key };
 			}
 		}
 

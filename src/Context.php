@@ -25,13 +25,39 @@ final class Context {
 
 	/** @return array{found:bool, value:mixed} */
 	public function lookup( string $name ): array {
-		for ( $i = count( $this->scopes ) - 1; $i >= 0; $i-- ) {
+		$count = count( $this->scopes );
+
+		if ( 1 === $count ) {
+			if ( array_key_exists( $name, $this->scopes[0] ) ) {
+				return [ 'found' => true, 'value' => $this->scopes[0][ $name ] ];
+			}
+
+			return [ 'found' => false, 'value' => null ];
+		}
+
+		for ( $i = $count - 1; $i >= 0; $i-- ) {
 			if ( array_key_exists( $name, $this->scopes[ $i ] ) ) {
 				return [ 'found' => true, 'value' => $this->scopes[ $i ][ $name ] ];
 			}
 		}
 
 		return [ 'found' => false, 'value' => null ];
+	}
+
+	public function get( string $name ): mixed {
+		$count = count( $this->scopes );
+
+		if ( 1 === $count ) {
+			return $this->scopes[0][ $name ] ?? ( array_key_exists( $name, $this->scopes[0] ) ? null : null );
+		}
+
+		for ( $i = $count - 1; $i >= 0; $i-- ) {
+			if ( array_key_exists( $name, $this->scopes[ $i ] ) ) {
+				return $this->scopes[ $i ][ $name ];
+			}
+		}
+
+		return null;
 	}
 
 	public function set( string $name, mixed $value ): void {
