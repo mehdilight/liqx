@@ -339,6 +339,14 @@ final class Evaluator {
 			return $object->$method( ...$args );
 		}
 
+		// Hosts hand over lazy collections (`\Countable` + `\Traversable` —
+		// e.g. a DB-backed paginated list) as plain values. Treat them like the
+		// arrays they stand in for: `.map`/`.filter`/`.length` fetch only what
+		// the collection itself decides to expose, never a full table read.
+		if ( is_object( $object ) && $object instanceof \Traversable ) {
+			return $this->arrayMethod( iterator_to_array( $object ), $method, $args, $ctx );
+		}
+
 		throw new LiqxException( sprintf( 'Cannot call method %s on %s', $method, get_debug_type( $object ) ) );
 	}
 
@@ -499,6 +507,11 @@ final class Evaluator {
 
 			if ( is_string( $object ) ) {
 				return mb_strlen( $object );
+			}
+
+			// Lazy collections answer size without hydrating items (a COUNT).
+			if ( $object instanceof \Countable ) {
+				return count( $object );
 			}
 		}
 

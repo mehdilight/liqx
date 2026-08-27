@@ -69,6 +69,36 @@ final class RenderTest extends TestCase {
 		);
 	}
 
+	public function testTraversableCollectionSupportsMap(): void {
+		$items = new \ArrayIterator( [ [ 'id' => 1, 'name' => 'a' ], [ 'id' => 2, 'name' => 'b' ] ] );
+		$this->assertSame(
+			'<ul><li>a</li><li>b</li></ul>',
+			$this->render( '<ul>{items.map(item => <li>{item.name}</li>)}</ul>', [ 'items' => $items ] )
+		);
+	}
+
+	public function testTraversableCollectionSupportsFilter(): void {
+		$items = new \ArrayIterator( [ [ 'n' => 1 ], [ 'n' => 2 ], [ 'n' => 3 ] ] );
+		$this->assertSame(
+			'2',
+			$this->render( '{items.filter(i => i.n > 1).length}', [ 'items' => $items ] )
+		);
+	}
+
+	public function testLazyCountableGivesLengthWithoutHydrating(): void {
+		$lazy = new class( 7 ) extends \ArrayIterator {
+			public function __construct( private readonly int $size ) {
+				parent::__construct( [] );
+			}
+
+			public function count(): int {
+				return $this->size;
+			}
+		};
+
+		$this->assertSame( '7', $this->render( '{items.length}', [ 'items' => $lazy ] ) );
+	}
+
 	public function testPipeFilters(): void {
 		$this->assertSame( 'HELLO', $this->render( '{text | upcase}', [ 'text' => 'hello' ] ) );
 		$this->assertSame(

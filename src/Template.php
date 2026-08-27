@@ -65,7 +65,11 @@ final class Template {
 		return $this->renderContext( $context );
 	}
 
-	private function renderContext( Context $context ): string {
+	/**
+	 * Render into a caller-built context — used by hosts that stage extra
+	 * scope (e.g. block children) on the context before rendering.
+	 */
+	public function renderContext( Context $context ): string {
 		try {
 			return ( new Renderer() )->render( $this->document, $context );
 		} catch ( LiqxException $e ) {
