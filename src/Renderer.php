@@ -75,11 +75,11 @@ final class Renderer {
 		}
 
 		if ( $node instanceof Style ) {
-			return '<style>' . $this->renderVerbatim( $node->body, $ctx ) . '</style>';
+			return '<style' . $this->renderAttrs( $node->attrs, $ctx ) . '>' . $this->renderVerbatim( $node->body, $ctx ) . '</style>';
 		}
 
 		if ( $node instanceof Script ) {
-			return '<script>' . $this->renderVerbatim( $node->body, $ctx ) . '</script>';
+			return '<script' . $this->renderAttrs( $node->attrs, $ctx ) . '>' . $this->renderVerbatim( $node->body, $ctx ) . '</script>';
 		}
 
 		if ( $node instanceof Output ) {
@@ -201,6 +201,37 @@ final class Renderer {
 		if ( null === $e->lineNumber ) {
 			$e->lineNumber = $line;
 		}
+	}
+
+	/**
+	 * @param list<array{name:string, value:Expr|null}> $attrs
+	 */
+	private function renderAttrs( array $attrs, Context $ctx ): string {
+		$out = '';
+
+		foreach ( $attrs as $attr ) {
+			if ( null === $attr['value'] ) {
+				$out .= ' ' . $attr['name'];
+
+				continue;
+			}
+
+			$value = $this->evaluator->evaluate( $attr['value'], $ctx );
+
+			if ( true === $value ) {
+				$out .= ' ' . $attr['name'];
+
+				continue;
+			}
+
+			if ( false === $value || null === $value ) {
+				continue;
+			}
+
+			$out .= ' ' . $attr['name'] . '="' . $this->stringify( $value ) . '"';
+		}
+
+		return $out;
 	}
 
 	/**

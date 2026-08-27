@@ -419,11 +419,20 @@ final class ExpressionParser {
 		return null;
 	}
 
-	/** @return list<Expr> */
+	/**
+	 * @return list<Expr>
+	 */
 	private function parseArguments(): array {
 		$args = [];
 
-		while ( null === $this->stream->accept( TokenType::CloseParen ) ) {
+		while ( true ) {
+			$token = $this->stream->current();
+
+			if ( null === $token || TokenType::CloseParen === $token->type ) {
+				// Empty `()` or a trailing comma — the CloseParen is the caller's.
+				return $args;
+			}
+
 			$args[] = $this->parse();
 
 			if ( null !== $this->stream->accept( TokenType::Comma ) ) {
@@ -574,9 +583,47 @@ final class ExpressionParser {
 
 		if ( null !== $peek && TokenType::Identifier === $peek->type
 			&& in_array( $peek->value, [ 'style', 'script', 'schema' ], true ) ) {
-			$this->stream->next(); // OpenTag
-			$name = $this->stream->next()->value;
-			$this->stream->expect( TokenType::TagEnd );
+			$open  = $this->stream->next(); // OpenTag
+			$name  = $this->stream->next()->value;
+			$attrs = [];
+
+			// Verbatim blocks can carry attributes (`<script src=... defer>`).
+			while ( null === $this->stream->accept( TokenType::TagEnd ) ) {
+				$token = $this->stream->current();
+
+				if ( null === $token ) {
+					throw SyntaxException::tagNeverClosed( $name, $peek->line );
+				}
+
+				if ( TokenType::SelfClose === $token->type ) {
+					$this->stream->next();
+
+					return $this->verbatimNode( $name, '', $attrs, $peek->line );
+				}
+
+				if ( TokenType::Identifier === $token->type ) {
+					$attrName = $this->stream->next()->value;
+					$value    = null;
+
+					if ( null !== $this->stream->accept( TokenType::AttrEquals ) ) {
+						$attrToken = $this->stream->current();
+
+						if ( null !== $attrToken && TokenType::AttrString === $attrToken->type ) {
+							$value = new Literal( $this->stream->next()->value );
+						} elseif ( null !== $attrToken && TokenType::ExpressionStart === $attrToken->type ) {
+							$this->stream->next();
+							$value = $this->parse();
+							$this->stream->expect( TokenType::ExpressionEnd );
+						}
+					}
+
+					$attrs[] = [ 'name' => $attrName, 'value' => $value ];
+
+					continue;
+				}
+
+				throw new SyntaxException( 'Unexpected token in element tag', $token->line );
+			}
 
 			$block = $this->stream->next();
 
@@ -584,13 +631,20 @@ final class ExpressionParser {
 				throw SyntaxException::tagNeverClosed( $name, $peek->line );
 			}
 
-			return match ( $name ) {
-				'style'  => new Style( $block->value ),
-				'script' => new Script( $block->value ),
-				default  => new Schema( $block->value ),
-			};
+			return $this->verbatimNode( $name, $block->value, $attrs, $peek->line );
 		}
 
 		return $this->parseElement();
+	}
+
+	/**
+	 * @param list<array{name:string, value:Expr|null}> $attrs
+	 */
+	private function verbatimNode( string $name, string $body, array $attrs, int $line ): Node {
+		return match ( $name ) {
+			'style'  => new Style( $body, $attrs ),
+			'script' => new Script( $body, $attrs ),
+			default  => new Schema( $body ),
+		};
 	}
 }

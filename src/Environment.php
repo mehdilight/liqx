@@ -136,7 +136,13 @@ final class Environment {
 			? new \ReflectionMethod( $callable[0], $callable[1] )
 			: new \ReflectionFunction( \Closure::fromCallable( $callable ) );
 
-		$type = $reflection->getParameters()[0]->getType() ?? null;
+		$parameters = $reflection->getParameters();
+
+		if ( [] === $parameters ) {
+			return false;
+		}
+
+		$type = $parameters[0]->getType() ?? null;
 
 		return $type instanceof \ReflectionNamedType
 			&& ! $type->isBuiltin()

@@ -276,6 +276,13 @@ final class Evaluator {
 
 	/** @param list<mixed> $args */
 	private function methodCall( mixed $object, string $method, array $args, Context $ctx ): mixed {
+		// Lenient on nothing — Liquid's `{% for line in nil %}` is an empty
+		// loop, and themes write `{collection.products.map(...)}` where the
+		// collection may be absent.
+		if ( null === $object ) {
+			return in_array( $method, [ 'map', 'filter', 'find' ], true ) ? [] : null;
+		}
+
 		if ( is_array( $object ) ) {
 			return $this->arrayMethod( $object, $method, $args, $ctx );
 		}
@@ -442,7 +449,9 @@ final class Evaluator {
 		}
 
 		if ( is_object( $object ) ) {
-			if ( property_exists( $object, (string) $key ) ) {
+			// Public properties only — a private/protected one must answer via
+			// beforeMethod (drops resolve everything that way).
+			if ( array_key_exists( (string) $key, get_object_vars( $object ) ) ) {
 				return $object->{ (string) $key };
 			}
 

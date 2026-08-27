@@ -219,6 +219,26 @@ final class CompositionTest extends TestCase {
 		$this->assertSame( '<img src="/img.jpg" />', $this->render( '<img src={image} />', [ 'image' => $image ] ) );
 	}
 
+	public function testPrivatePropertiesFallThroughToBeforeMethod(): void {
+		$drop = new class {
+			private string $locale = 'hidden';
+
+			public function beforeMethod( string $method ): mixed {
+				return 'locale' === $method ? 'fr' : null;
+			}
+		};
+
+		$this->assertSame( '<div lang="fr"></div>', $this->render( '<div lang={drop.locale}></div>', [ 'drop' => $drop ] ) );
+	}
+
+	public function testPublicPropertiesAreReadDirectly(): void {
+		$drop = new class {
+			public string $title = 'Widget';
+		};
+
+		$this->assertSame( '<h1>Widget</h1>', $this->render( '<h1>{drop.title}</h1>', [ 'drop' => $drop ] ) );
+	}
+
 	public function testMissingPartialThrows(): void {
 		$this->expectException( \Phpmystic\Liqx\FileSystemException::class );
 		$this->render( '{render("does-not-exist")}' );

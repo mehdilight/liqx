@@ -81,6 +81,23 @@ final class RenderTest extends TestCase {
 		$this->assertSame( '<p>ab</p>', $this->render( '<p>a{/* hidden */}b</p>' ) );
 	}
 
+	public function testEmptyCall(): void {
+		$this->env->registerGlobal( 'appEmbeds', static fn (): string => 'appEmbeds()' );
+		$this->assertSame( 'appEmbeds()', $this->render( '{appEmbeds()}' ) );
+	}
+
+	public function testCallWithTrailingComma(): void {
+		$this->env->registerGlobal( 'f', static fn ( mixed $a ): string => 'ok' );
+		$this->assertSame( 'ok', $this->render( "{f('x',)}" ) );
+	}
+
+	public function testMapOnUndefinedRendersEmpty(): void {
+		$this->assertSame(
+			'<ul></ul>',
+			$this->render( '<ul>{maybe.lines.map(line => <li>{line.title}</li>)}</ul>' )
+		);
+	}
+
 	public function testLiteralBraces(): void {
 		$this->assertSame( '<p>{{ not interpolated }}</p>', $this->render( "<p>{'{{ not interpolated }}'}</p>" ) );
 	}
@@ -124,6 +141,11 @@ final class RenderTest extends TestCase {
 	public function testScriptBlockKeepsJsObjectWithSemicolonsLiteral(): void {
 		$source = '<script>if (a) { b(); }</script>';
 		$this->assertSame( '<script>if (a) { b(); }</script>', $this->render( $source ) );
+	}
+
+	public function testScriptBlockWithAttributes(): void {
+		$source = '<script src={url} defer>window.x = 1;</script>';
+		$this->assertSame( '<script src="/a.js" defer>window.x = 1;</script>', $this->render( $source, [ 'url' => '/a.js' ] ) );
 	}
 
 	public function testDocumentExposesLastStyleBlock(): void {
