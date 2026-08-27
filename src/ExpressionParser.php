@@ -329,8 +329,9 @@ final class ExpressionParser {
 				if ( null !== $this->stream->accept( TokenType::OpenParen ) ) {
 					$args = $this->parseArguments();
 					$this->stream->expect( TokenType::CloseParen );
+					$expr = new Call( $member, $args );
 
-					return new Call( $member, $args );
+					continue;
 				}
 
 				$expr = $member;
@@ -578,7 +579,7 @@ final class ExpressionParser {
 		}
 	}
 
-	public function parseElement(): Element {
+	public function parseElement(): Node {
 		$open  = $this->stream->expect( TokenType::OpenTag );
 		$tag   = $this->stream->expect( TokenType::Identifier )->value;
 		$line  = $open->line;
@@ -594,6 +595,14 @@ final class ExpressionParser {
 
 			if ( TokenType::TagEnd === $token->type ) {
 				$this->stream->next();
+
+				// <style>/<script> inside an expression still have a verbatim
+				// body token captured by the lexer, not JSX children.
+				$verbatim = $this->peekVerbatimBody( $tag );
+
+				if ( null !== $verbatim ) {
+					return $verbatim;
+				}
 
 				return new Element( $tag, $attrs, $this->parseChildren( $tag ), selfClosing: false, line: $line );
 			}
@@ -692,7 +701,7 @@ final class ExpressionParser {
 				if ( TokenType::SelfClose === $token->type ) {
 					$this->stream->next();
 
-					return $this->verbatimNode( $name, '', $attrs, $peek->line );
+					return new Element( $name, $attrs, [], selfClosing: true, line: $open->line );
 				}
 
 				if ( TokenType::Identifier === $token->type ) {
@@ -719,13 +728,23 @@ final class ExpressionParser {
 				throw new SyntaxException( 'Unexpected token in element tag', $token->line );
 			}
 
-			$block = $this->stream->next();
+			// A verbatim body token means the lexer captured a <style>/<script>/
+			// <schema> block; otherwise this is a regular element.
+			$verbatim = $this->peekVerbatimBody( $name, $attrs, $open->line );
 
-			if ( null === $block ) {
-				throw SyntaxException::tagNeverClosed( $name, $peek->line );
+			if ( null !== $verbatim ) {
+				return $verbatim;
 			}
 
-			return $this->verbatimNode( $name, $block->value, $attrs, $peek->line );
+			$body = $this->stream->current();
+
+			if ( null !== $body && TokenType::Schema === $body->type ) {
+				$this->stream->next();
+
+				return new Schema( $body->value );
+			}
+
+			return new Element( $name, $attrs, $this->parseChildren( $name ), selfClosing: false, line: $open->line );
 		}
 
 		return $this->parseElement();
@@ -734,6 +753,30 @@ final class ExpressionParser {
 	/**
 	 * @param list<array{name:string, value:Expr|null}> $attrs
 	 */
+	/**
+	 * If the next token is a verbatim body (Style/Script), consume it and
+	 * return the node; used by both document and expression element parsing.
+	 *
+	 * @param list<array{name:string|null, value:Expr|null, spread:bool}> $attrs
+	 */
+	private function peekVerbatimBody( string $tag, array $attrs = [], int $line = 0 ): ?Node {
+		if ( ! in_array( $tag, [ 'style', 'script' ], true ) ) {
+			return null;
+		}
+
+		$token = $this->stream->current();
+
+		if ( null === $token || ! in_array( $token->type, [ TokenType::Style, TokenType::Script ], true ) ) {
+			return null;
+		}
+
+		$this->stream->next();
+
+		return 'style' === $tag
+			? new Style( $token->value, $attrs )
+			: new Script( $token->value, $attrs );
+	}
+
 	private function verbatimNode( string $name, string $body, array $attrs, int $line ): Node {
 		return match ( $name ) {
 			'style'  => new Style( $body, $attrs ),

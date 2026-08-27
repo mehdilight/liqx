@@ -102,6 +102,14 @@ final class Evaluator {
 			return $this->renderer->renderElement( $expr, $ctx );
 		}
 
+		if ( $expr instanceof \Phpmystic\Liqx\Node\Style ) {
+			return $this->renderer->renderStyle( $expr, $ctx );
+		}
+
+		if ( $expr instanceof \Phpmystic\Liqx\Node\Script ) {
+			return $this->renderer->renderScript( $expr, $ctx );
+		}
+
 		throw new LiqxException( 'Cannot evaluate expression node ' . $expr::class );
 	}
 

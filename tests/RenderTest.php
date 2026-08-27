@@ -103,6 +103,21 @@ final class RenderTest extends TestCase {
 		$this->assertSame( 'class', $this->render( '{tag({ class: "x" })}' ) );
 	}
 
+	public function testChainedMethodCalls(): void {
+		$this->assertSame(
+			'<li>x</li><li>y</li>',
+			$this->render( '{items.slice(0, 2).map(i => <li>{i.name}</li>)}', [ 'items' => [ [ 'name' => 'x' ], [ 'name' => 'y' ], [ 'name' => 'z' ] ] ] )
+		);
+	}
+
+	public function testScriptInsideExpressionIsAElement(): void {
+		// <script> in a { } expression is an ordinary element, not a verbatim block.
+		$this->assertSame(
+			'<div><script src="/a.js" defer></script></div>',
+			$this->render( '{show && <div><script src={url} defer></script></div>}', [ 'show' => true, 'url' => '/a.js' ] )
+		);
+	}
+
 	public function testLiteralBraces(): void {
 		$this->assertSame( '<p>{{ not interpolated }}</p>', $this->render( "<p>{'{{ not interpolated }}'}</p>" ) );
 	}

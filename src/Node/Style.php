@@ -6,7 +6,7 @@ namespace Phpmystic\Liqx\Node;
 use Phpmystic\Liqx\Expr;
 use Phpmystic\Liqx\Node;
 
-final class Style implements Node {
+final class Style implements Node, Expr {
 
 	/** @param list<array{name:string, value:Expr|null}> $attrs */
 	public function __construct(

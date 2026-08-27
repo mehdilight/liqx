@@ -7,7 +7,7 @@ use Phpmystic\Liqx\Expr;
 use Phpmystic\Liqx\Node;
 
 /** A `<script>` body — verbatim, with selective `{expr}` interpolation. */
-final class Script implements Node {
+final class Script implements Node, Expr {
 
 	/** @param list<array{name:string, value:Expr|null}> $attrs */
 	public function __construct(

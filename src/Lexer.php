@@ -330,8 +330,10 @@ final class Lexer {
 		$name = $this->currentTagName;
 		$this->currentTagName = '';
 
-		// Verbatim block capture for <style> / <script> / <schema>.
-		if ( 'style' === $name || 'script' === $name || 'schema' === $name ) {
+		// Verbatim block capture for <style> / <script> / <schema> — their bodies
+		// are CSS/JS, never JSX children, even when the tag sits inside a Js
+		// expression.
+		if ( in_array( $name, [ 'style', 'script', 'schema' ], true ) ) {
 			$this->mode = match ( $name ) {
 				'style'  => LexerMode::Style,
 				'script' => LexerMode::Script,
@@ -628,13 +630,16 @@ final class Lexer {
 
 		$body = substr( $this->source, $this->cursor, $m[0][1] - $this->cursor );
 
-		if ( '' !== $body ) {
-			$this->push( $type, $body, $startLine );
-		}
+		// Always emit the block token — even an empty body marks the block, so
+		// the parser can tell verbatim from a regular element.
+		$this->push( $type, $body, $startLine );
 
 		$this->line += substr_count( $body, "\n" );
 		$this->cursor = $m[0][1] + strlen( $m[0][0] );
-		$this->mode   = LexerMode::Content;
+
+		// Return to the mode before the block — an in-expression <script> must
+		// leave the enclosing `{…}` open, a document block resumes Content.
+		$this->mode = $this->tagReturnMode;
 	}
 
 	// ---------------------------------------------------------------------
@@ -848,6 +853,16 @@ final class Lexer {
 			'return', 'typeof', 'new', 'throw', 'void', 'delete',
 			'in', 'instanceof', 'yield', 'await', 'case',
 		], true );
+	}
+
+	private function hasFromJsTag(): bool {
+		foreach ( $this->tagStack as $entry ) {
+			if ( $entry['fromJs'] ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private function push( TokenType $type, string $value, int $line ): void {

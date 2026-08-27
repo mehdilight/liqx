@@ -76,12 +76,12 @@ final class Renderer {
 			return $node->value;
 		}
 
-		if ( $node instanceof Style ) {
-			return '<style' . $this->renderAttrs( $node->attrs, $ctx ) . '>' . $this->renderVerbatim( $node->body, $ctx ) . '</style>';
+if ( $node instanceof Style ) {
+			return $this->renderStyle( $node, $ctx );
 		}
 
 		if ( $node instanceof Script ) {
-			return '<script' . $this->renderAttrs( $node->attrs, $ctx ) . '>' . $this->renderVerbatim( $node->body, $ctx ) . '</script>';
+			return $this->renderScript( $node, $ctx );
 		}
 
 		if ( $node instanceof Output ) {
@@ -203,6 +203,14 @@ final class Renderer {
 		if ( null === $e->lineNumber ) {
 			$e->lineNumber = $line;
 		}
+	}
+
+	public function renderStyle( Style $node, Context $ctx ): string {
+		return '<style>' . $this->renderVerbatim( $node->body, $ctx ) . '</style>';
+	}
+
+	public function renderScript( Script $node, Context $ctx ): string {
+		return '<script' . $this->renderAttrs( $node->attrs, $ctx ) . '>' . $this->renderVerbatim( $node->body, $ctx ) . '</script>';
 	}
 
 	/**
