@@ -1,0 +1,36 @@
+{
+    "name": "phpmystic/liqx",
+    "version": "0.1.0",
+    "description": "A compiler-grounded JSX-flavored template engine for PHP. Keeps Liquid's section/schema/block model but swaps {{ }} / {% %} for real HTML + real JS-style { } expressions, with a restricted, sandboxed frontmatter subset.",
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "php": ">=8.2",
+        "ext-mbstring": "*"
+    },
+    "require-dev": {
+        "phpstan/phpstan": "^2.2",
+        "phpunit/phpunit": "^11.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Phpmystic\\Liqx\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Phpmystic\\Liqx\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "sort-packages": true,
+        "platform": {
+            "php": "8.2"
+        }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "lint": "@php -r 'foreach (array_merge(glob(\"src/**/*.php\"), glob(\"tests/**/*.php\")) as $f) { exec(\"php -l \" . escapeshellarg($f) . \" 2>&1\", $o, $c); if ($c) { echo implode(PHP_EOL, $o), PHP_EOL; exit(1); } } echo \"lint clean\", PHP_EOL;'",
+        "analyse": "phpstan analyse"
+    }
+}
