@@ -304,9 +304,27 @@ final class Renderer {
 		}
 
 		$depth = 0;
+		$quote = null;
 
 		for ( $i = 0, $len = strlen( $content ); $i < $len; $i++ ) {
 			$char = $content[ $i ];
+
+			// Inside a string/template literal, `:`/`;` belong to the literal.
+			if ( null !== $quote ) {
+				if ( '\\' === $char ) {
+					$i++;
+				} elseif ( $char === $quote ) {
+					$quote = null;
+				}
+
+				continue;
+			}
+
+			if ( "'" === $char || '"' === $char || '`' === $char ) {
+				$quote = $char;
+
+				continue;
+			}
 
 			if ( in_array( $char, [ '(', '[', '{' ], true ) ) {
 				$depth++;

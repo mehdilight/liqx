@@ -153,6 +153,14 @@ final class RenderTest extends TestCase {
 		$this->assertSame( '<script src="/a.js" defer>window.x = 1;</script>', $this->render( $source, [ 'url' => '/a.js' ] ) );
 	}
 
+	public function testStyleInterpolationAllowsColonsInsideStrings(): void {
+		$source = '<style>.a { --x: {cond && `--hero-background-image: url(${url});`}; }</style>';
+		$this->assertSame(
+			'<style>.a { --x: --hero-background-image: url(/u.jpg);; }</style>',
+			$this->render( $source, [ 'cond' => true, 'url' => '/u.jpg' ] )
+		);
+	}
+
 	public function testDocumentExposesLastStyleBlock(): void {
 		$template = Template::parse( '<style>.a{}</style><style>.b{}</style>' );
 		$this->assertSame( '.b{}', $template->document()->style?->body );
