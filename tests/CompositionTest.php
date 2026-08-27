@@ -108,6 +108,22 @@ final class CompositionTest extends TestCase {
 		$this->assertSame( '<section><div class="card">Alpha</div></section>', $this->render( '{section("hero")}' ) );
 	}
 
+	public function testSectionGlobalSharesParentScope(): void {
+		$this->write( 'sections/header.liqx', '<h1>{shop.name}</h1><span>{section.name}</span>' );
+
+		$this->assertSame(
+			'<h1>Cein</h1><span>header</span>',
+			$this->render( '{section("header")}', [ 'shop' => [ 'name' => 'Cein' ] ] )
+		);
+	}
+
+	public function testRenderSnippetStaysIsolated(): void {
+		$this->write( 'snippets/card.liqx', '<p>{props.label}</p>' );
+
+		// A parent variable must NOT leak into an explicit-props snippet.
+		$this->assertSame( '<p>explicit</p>', $this->render( '{render("card", { label: "explicit" })}', [ 'label' => 'leaked' ] ) );
+	}
+
 	public function testCustomGlobalIsLikeALiquidTag(): void {
 		$this->env->registerGlobal( 'badge', static fn ( string $text ) => '<span class="badge">' . $text . '</span>' );
 

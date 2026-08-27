@@ -97,15 +97,17 @@ final class Environment {
 
 	/**
 	 * Parse + render a named template through a FileSystem, cached so repeated
-	 * calls re-render the same parsed document.
+	 * calls re-render the same parsed document. When a parent Context is given,
+	 * the partial renders with the parent's scope visible (nested section
+	 * renders); otherwise it gets a fresh scope.
 	 *
 	 * @param array<string, mixed> $data
 	 */
-	public function renderPartial( string $name, FileSystem $fileSystem, array $data = [] ): string {
+	public function renderPartial( string $name, FileSystem $fileSystem, array $data = [], ?Context $parent = null ): string {
 		$key      = spl_object_id( $fileSystem ) . ':' . $name;
 		$template = $this->partials[ $key ] ??= Template::parse( $fileSystem->load( $name ), $this, $name );
 
-		return $template->render( $data );
+		return null !== $parent ? $template->renderIn( $data, $parent ) : $template->render( $data );
 	}
 
 	private function makeRenderGlobal(): callable {
@@ -119,12 +121,13 @@ final class Environment {
 	}
 
 	private function makeSectionGlobal(): callable {
-		return function ( string $name ): string {
+		// Context-aware: `{% section %}` renders with the parent scope visible.
+		return function ( Context $context, string $name ): string {
 			if ( null === $this->sectionFileSystem ) {
 				throw new \RuntimeException( 'No section file system configured' );
 			}
 
-			return $this->renderPartial( $name, $this->sectionFileSystem, [ 'section' => [ 'name' => $name ] ] );
+			return $this->renderPartial( $name, $this->sectionFileSystem, [ 'section' => [ 'name' => $name ] ], $context );
 		};
 	}
 

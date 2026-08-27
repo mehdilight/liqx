@@ -50,6 +50,22 @@ final class Template {
 	public function render( array $data = [], bool $strict = false ): string {
 		$context = new Context( $this->environment, $strict, $data );
 
+		return $this->renderContext( $context );
+	}
+
+	/**
+	 * Render with a parent context's scope visible (plus `$data`) — nested
+	 * section renders share the page scope.
+	 *
+	 * @param array<string, mixed> $data
+	 */
+	public function renderIn( array $data, Context $parent, bool $strict = false ): string {
+		$context = Context::inherit( $this->environment, $strict || $parent->strict, $parent, $data );
+
+		return $this->renderContext( $context );
+	}
+
+	private function renderContext( Context $context ): string {
 		try {
 			return ( new Renderer() )->render( $this->document, $context );
 		} catch ( LiqxException $e ) {

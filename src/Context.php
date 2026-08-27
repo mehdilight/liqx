@@ -46,4 +46,19 @@ final class Context {
 	public function pop(): void {
 		array_pop( $this->scopes );
 	}
+
+	/**
+	 * A child context that sees the parent's scopes plus its own data — how
+	 * `{% section %}`-style nested renders share the page scope without
+	 * leaking anything back.
+	 *
+	 * @param array<string, mixed> $data
+	 */
+	public static function inherit( Environment $environment, bool $strict, self $parent, array $data = [] ): self {
+		$context          = new self( $environment, $strict );
+		$context->scopes  = $parent->scopes;
+		$context->scopes[] = $data;
+
+		return $context;
+	}
 }
