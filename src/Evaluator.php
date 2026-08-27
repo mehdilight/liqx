@@ -266,8 +266,10 @@ final class Evaluator {
 				$value = $this->evaluate( $declaration->init, $ctx );
 
 				foreach ( $declaration->bindings as $binding ) {
-					if ( is_array( $value ) && array_key_exists( $binding['name'], $value ) ) {
-						$ctx->set( $binding['name'], $value[ $binding['name'] ] );
+					[ 'found' => $found, 'value' => $resolved ] = $this->lookupProperty( $value, $binding['name'] );
+
+					if ( $found ) {
+						$ctx->set( $binding['name'], $resolved );
 
 						continue;
 					}
@@ -462,6 +464,24 @@ final class Evaluator {
 	// ---------------------------------------------------------------------
 	// Value helpers
 	// ---------------------------------------------------------------------
+
+	/**
+	 * Resolve a destructuring key against a value — arrays, public properties,
+	 * and drop `beforeMethod` lookups.
+	 *
+	 * @return array{found:bool, value:mixed}
+	 */
+	public function lookupProperty( mixed $object, string $key ): array {
+		if ( is_array( $object ) ) {
+			return [ 'found' => array_key_exists( $key, $object ), 'value' => $object[ $key ] ?? null ];
+		}
+
+		if ( is_object( $object ) ) {
+			return [ 'found' => true, 'value' => $this->getProperty( $object, $key ) ];
+		}
+
+		return [ 'found' => false, 'value' => null ];
+	}
 
 	private function getProperty( mixed $object, mixed $key ): mixed {
 		if ( 'length' === $key ) {

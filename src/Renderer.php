@@ -37,8 +37,10 @@ final class Renderer {
 					$value = $this->evaluator->evaluate( $declaration->init, $ctx );
 
 					foreach ( $declaration->bindings as $binding ) {
-						if ( is_array( $value ) && array_key_exists( $binding['name'], $value ) ) {
-							$ctx->set( $binding['name'], $value[ $binding['name'] ] );
+						[ 'found' => $found, 'value' => $resolved ] = $this->evaluator->lookupProperty( $value, $binding['name'] );
+
+						if ( $found ) {
+							$ctx->set( $binding['name'], $resolved );
 
 							continue;
 						}

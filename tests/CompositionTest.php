@@ -239,6 +239,17 @@ final class CompositionTest extends TestCase {
 		$this->assertSame( '<h1>Widget</h1>', $this->render( '<h1>{drop.title}</h1>', [ 'drop' => $drop ] ) );
 	}
 
+	public function testDestructureFromDropObject(): void {
+		$section = new class {
+			public function beforeMethod( string $method ): mixed {
+				return 'settings' === $method ? [ 'heading' => 'Sale' ] : null;
+			}
+		};
+
+		$source = "---\nconst { settings } = section;\n---\n<p>{settings.heading}</p>";
+		$this->assertSame( '<p>Sale</p>', $this->render( $source, [ 'section' => $section ] ) );
+	}
+
 	public function testMissingPartialThrows(): void {
 		$this->expectException( \Phpmystic\Liqx\FileSystemException::class );
 		$this->render( '{render("does-not-exist")}' );
