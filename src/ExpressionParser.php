@@ -340,7 +340,10 @@ final class ExpressionParser {
 		$properties = [];
 
 		while ( null === $this->stream->acceptValue( TokenType::Operator, '}' ) ) {
-			$keyToken = $this->stream->accept( TokenType::Identifier ) ?? $this->stream->accept( TokenType::String );
+			$keyToken = $this->stream->accept( TokenType::Identifier )
+				?? $this->stream->accept( TokenType::String )
+				?? $this->stream->accept( TokenType::Keyword );
+
 			if ( null === $keyToken ) {
 				throw new SyntaxException( 'Expected object key', $this->stream->current()?->line );
 			}

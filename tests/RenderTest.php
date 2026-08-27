@@ -98,6 +98,11 @@ final class RenderTest extends TestCase {
 		);
 	}
 
+	public function testObjectLiteralWithReservedWordKey(): void {
+		$this->env->registerGlobal( 'tag', static fn ( array $attrs = [] ): string => implode( ' ', array_keys( $attrs ) ) );
+		$this->assertSame( 'class', $this->render( '{tag({ class: "x" })}' ) );
+	}
+
 	public function testLiteralBraces(): void {
 		$this->assertSame( '<p>{{ not interpolated }}</p>', $this->render( "<p>{'{{ not interpolated }}'}</p>" ) );
 	}
