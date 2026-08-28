@@ -23,25 +23,49 @@ namespace Phpmystic\Liqx;
  */
 final class Lexer {
 
-	/** @var list<string> reserved words that get their own token kind. */
+	/**
+	 * Reserved words that get their own token kind. Keyed for O(1) `isset()`
+	 * membership — checked once per identifier token.
+	 *
+	 * @var array<string, true>
+	 */
 	private const KEYWORDS = [
-		'const', 'let', 'var', 'return', 'function', 'new', 'typeof',
-		'this', 'if', 'else', 'for', 'while', 'do', 'switch', 'case',
-		'break', 'continue', 'throw', 'try', 'catch', 'finally',
-		'void', 'delete', 'of', 'in', 'instanceof', 'import', 'export',
-		'default', 'class', 'extends', 'super', 'async', 'await',
-		'yield', 'static',
+		'const' => true, 'let' => true, 'var' => true, 'return' => true,
+		'function' => true, 'new' => true, 'typeof' => true, 'this' => true,
+		'if' => true, 'else' => true, 'for' => true, 'while' => true,
+		'do' => true, 'switch' => true, 'case' => true, 'break' => true,
+		'continue' => true, 'throw' => true, 'try' => true, 'catch' => true,
+		'finally' => true, 'void' => true, 'delete' => true, 'of' => true,
+		'in' => true, 'instanceof' => true, 'import' => true, 'export' => true,
+		'default' => true, 'class' => true, 'extends' => true, 'super' => true,
+		'async' => true, 'await' => true, 'yield' => true, 'static' => true,
 	];
 
+	/** Keywords after which the next token is an operand. @var array<string, true> */
+	private const OPERAND_AFTER_KEYWORD = [
+		'return' => true, 'typeof' => true, 'new' => true, 'throw' => true,
+		'void' => true, 'delete' => true, 'in' => true, 'instanceof' => true,
+		'yield' => true, 'await' => true, 'case' => true,
+	];
+
+	/** @var array<string, true> */
 	private const TWO_CHAR_OPERATORS = [
-		'&&', '||', '??', '==', '!=', '===', '!==', '<=', '>=',
-		'**', '+=', '-=', '*=', '/=', '%=', '<<', '>>',
+		'&&' => true, '||' => true, '??' => true, '==' => true, '!=' => true,
+		'===' => true, '!==' => true, '<=' => true, '>=' => true, '**' => true,
+		'+=' => true, '-=' => true, '*=' => true, '/=' => true, '%=' => true,
+		'<<' => true, '>>' => true,
 	];
 
-	/** HTML void elements — `<input>`/`<img>`/`<br>` close themselves. */
+	/**
+	 * HTML void elements — `<input>`/`<img>`/`<br>` close themselves.
+	 *
+	 * @var array<string, true>
+	 */
 	private const VOID_ELEMENTS = [
-		'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
-		'link', 'meta', 'param', 'source', 'track', 'wbr',
+		'area' => true, 'base' => true, 'br' => true, 'col' => true,
+		'embed' => true, 'hr' => true, 'img' => true, 'input' => true,
+		'link' => true, 'meta' => true, 'param' => true, 'source' => true,
+		'track' => true, 'wbr' => true,
 	];
 
 	private string $source = '';
@@ -258,7 +282,7 @@ final class Lexer {
 		$char = $this->source[ $this->cursor ];
 
 		if ( '>' === $char ) {
-			$isVoid = in_array( $this->currentTagName, self::VOID_ELEMENTS, true );
+			$isVoid = isset( self::VOID_ELEMENTS[ $this->currentTagName ] );
 
 			// A void element closes itself even without `/>` — `<input>` has no
 			// children, so nothing goes on the tag stack and nothing waits to
@@ -436,8 +460,8 @@ final class Lexer {
 	 * frontmatter block).
 	 */
 	private function lexJsToken(): void {
-		$this->skipWhitespace();
-
+		// Callers (`lexJs`, `lexFrontmatter`) already skipped whitespace and
+		// bounds-checked the cursor.
 		$char = $this->source[ $this->cursor ];
 		$next = $this->source[ $this->cursor + 1 ] ?? '';
 
@@ -486,11 +510,11 @@ final class Lexer {
 		if ( $this->isIdentifierStart( $char ) ) {
 			$value = $this->scanIdentifier( allowDash: false );
 			$this->push(
-				in_array( $value, self::KEYWORDS, true ) ? TokenType::Keyword : TokenType::Identifier,
+				isset( self::KEYWORDS[ $value ] ) ? TokenType::Keyword : TokenType::Identifier,
 				$value,
 				$this->line
 			);
-			$this->expectOperand = $this->expectsOperandAfterKeyword( $value );
+			$this->expectOperand = isset( self::OPERAND_AFTER_KEYWORD[ $value ] );
 
 			return;
 		}
@@ -535,7 +559,7 @@ final class Lexer {
 			return;
 		}
 
-		if ( in_array( $two, self::TWO_CHAR_OPERATORS, true ) ) {
+		if ( isset( self::TWO_CHAR_OPERATORS[ $two ] ) ) {
 			$this->push( TokenType::Operator, $two, $this->line );
 			$this->cursor += 2;
 			$this->expectOperand = true;
@@ -799,7 +823,7 @@ final class Lexer {
 		while ( $this->cursor < $this->length ) {
 			$char = $this->source[ $this->cursor ];
 
-			if ( $this->isIdentifierStart( $char ) || ctype_digit( $char ) || '$' === $char || ( $allowDash && '-' === $char ) ) {
+			if ( $this->isIdentifierStart( $char ) || $this->isDigit( $char ) || '$' === $char || ( $allowDash && '-' === $char ) ) {
 				$this->cursor++;
 
 				continue;
@@ -859,13 +883,6 @@ final class Lexer {
 		return substr( $this->source, $offset, false === $end ? $this->length - $offset : $end - $offset );
 	}
 
-	private function expectsOperandAfterKeyword( string $keyword ): bool {
-		return in_array( $keyword, [
-			'return', 'typeof', 'new', 'throw', 'void', 'delete',
-			'in', 'instanceof', 'yield', 'await', 'case',
-		], true );
-	}
-
 	private function push( TokenType $type, string $value, int $line ): void {
 		if ( TokenType::Text === $type && '' === $value ) {
 			return;
@@ -879,6 +896,8 @@ final class Lexer {
 	}
 
 	private function isIdentifierStart( string $char ): bool {
-		return '' !== $char && ( ctype_alpha( $char ) || '_' === $char );
+		return ( $char >= 'a' && $char <= 'z' )
+			|| ( $char >= 'A' && $char <= 'Z' )
+			|| '_' === $char;
 	}
 }

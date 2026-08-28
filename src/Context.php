@@ -55,15 +55,13 @@ final class Context {
 			return $this->scopes[0];
 		}
 
-		$count = count( $this->scopes );
+		// Walk innermost scope out. `array_key_exists` (not `??`) so a scope that
+		// explicitly holds `null` still shadows outer scopes.
+		for ( $i = count( $this->scopes ) - 1; $i >= 0; $i-- ) {
+			$scope = $this->scopes[ $i ];
 
-		if ( 1 === $count ) {
-			return $this->scopes[0][ $name ] ?? ( array_key_exists( $name, $this->scopes[0] ) ? null : null );
-		}
-
-		for ( $i = $count - 1; $i >= 0; $i-- ) {
-			if ( array_key_exists( $name, $this->scopes[ $i ] ) ) {
-				return $this->scopes[ $i ][ $name ];
+			if ( array_key_exists( $name, $scope ) ) {
+				return $scope[ $name ];
 			}
 		}
 

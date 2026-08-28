@@ -14,10 +14,21 @@ namespace Phpmystic\Liqx;
  */
 final class CompiledTemplate {
 
+	/**
+	 * Shared, stateless value-semantics helper. The generated closure only ever
+	 * calls pure methods on it (filters, property lookup, stringify), so one
+	 * instance serves every render in the process.
+	 */
+	private static ?Evaluator $evaluator = null;
+
 	private function __construct(
 		private readonly \Closure $render,
 		private string $name = '',
 	) {}
+
+	private static function evaluator(): Evaluator {
+		return self::$evaluator ??= new Evaluator( new Renderer() );
+	}
 
 	/** Compile a PHP source string and load it (used when no cache dir is set). */
 	public static function fromSource( string $phpSource, string $name = '' ): self {
@@ -80,7 +91,7 @@ final class CompiledTemplate {
 	/** Render into a caller-built context. */
 	public function renderContext( Context $context ): string {
 		try {
-			return ( $this->render )( $context, new Evaluator( new Renderer() ) );
+			return ( $this->render )( $context, self::evaluator() );
 		} catch ( LiqxException $e ) {
 			if ( null === $e->templateName && '' !== $this->name ) {
 				$e->templateName = $this->name;

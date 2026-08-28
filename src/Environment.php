@@ -85,6 +85,21 @@ final class Environment {
 		return $this->globals[ $name ] ?? null;
 	}
 
+	/**
+	 * The registered surface of this environment, for tooling (LSP completion /
+	 * hover). Filters and globals returned by name so a client can suggest and
+	 * document exactly what a template can call here — including anything a host
+	 * registered on top of the standard set.
+	 *
+	 * @return array{ filters: list<string>, globals: list<string> }
+	 */
+	public function capabilities(): array {
+		return [
+			'filters' => array_keys( $this->filters ),
+			'globals' => array_keys( $this->globals ),
+		];
+	}
+
 	public function setSnippetFileSystem( FileSystem $fileSystem ): void {
 		$this->snippetFileSystem = $fileSystem;
 	}
@@ -125,7 +140,7 @@ final class Environment {
 			return;
 		}
 
-		foreach ( glob( $this->compiledTemplateDir . '/*.php' ) ?: [] as $file ) {
+		foreach ( glob( $this->compiledTemplateDir . '/*.{php,meta}', GLOB_BRACE ) ?: [] as $file ) {
 			@unlink( $file );
 		}
 	}

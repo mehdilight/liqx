@@ -52,7 +52,12 @@ final class Evaluator {
 		}
 
 		if ( $expr instanceof ArrayLit ) {
-			return array_map( fn ( Expr $e ) => $this->evaluate( $e, $ctx ), $expr->elements );
+			$out = [];
+			foreach ( $expr->elements as $element ) {
+				$out[] = $this->evaluate( $element, $ctx );
+			}
+
+			return $out;
 		}
 
 		if ( $expr instanceof ObjectLit ) {
@@ -179,7 +184,10 @@ final class Evaluator {
 	}
 
 	private function evalCall( Call $expr, Context $ctx ): mixed {
-		$args = array_map( fn ( Expr $a ) => $this->evaluate( $a, $ctx ), $expr->args );
+		$args = [];
+		foreach ( $expr->args as $arg ) {
+			$args[] = $this->evaluate( $arg, $ctx );
+		}
 
 		$callee = $expr->callee;
 
@@ -227,7 +235,7 @@ final class Evaluator {
 		$right = $this->evaluate( $expr->right, $ctx );
 
 		return match ( $expr->op ) {
-			'+'   => ( is_string( $left ) || is_string( $right ) ) ? (string) $left . (string) $right : $this->toNumber( $left ) + $this->toNumber( $right ),
+			'+'   => $this->add( $left, $right ),
 			'-'   => $this->toNumber( $left ) - $this->toNumber( $right ),
 			'*'   => $this->toNumber( $left ) * $this->toNumber( $right ),
 			'/'   => $this->toNumber( $left ) / $this->toNumber( $right ),
@@ -242,6 +250,19 @@ final class Evaluator {
 			'>='  => $this->compare( $left, $right ) >= 0,
 			default => throw new LiqxException( 'Unknown operator ' . $expr->op ),
 		};
+	}
+
+	/**
+	 * The `+` operator — string concatenation when either side is a string,
+	 * numeric addition otherwise. Shared by the interpreter and compiled
+	 * templates so each operand is evaluated exactly once.
+	 */
+	public function add( mixed $left, mixed $right ): string|int|float {
+		if ( is_string( $left ) || is_string( $right ) ) {
+			return (string) $left . (string) $right;
+		}
+
+		return $this->toNumber( $left ) + $this->toNumber( $right );
 	}
 
 	private function evalLogical( Logical $expr, Context $ctx ): mixed {
@@ -279,10 +300,12 @@ final class Evaluator {
 	}
 
 	private function evalTemplateString( TemplateString $expr, Context $ctx ): string {
-		return $this->templateString(
-			array_map( fn ( string|Expr $part ) => is_string( $part ) ? $part : $this->evaluate( $part, $ctx ), $expr->parts ),
-			$ctx
-		);
+		$parts = [];
+		foreach ( $expr->parts as $part ) {
+			$parts[] = is_string( $part ) ? $part : $this->evaluate( $part, $ctx );
+		}
+
+		return $this->templateString( $parts, $ctx );
 	}
 
 	/**
@@ -335,7 +358,12 @@ final class Evaluator {
 		$pipeline = [];
 
 		foreach ( $expr->filters as $filter ) {
-			$pipeline[] = [ $filter->name, array_map( fn ( Expr $a ) => $this->evaluate( $a, $ctx ), $filter->args ) ];
+			$args = [];
+			foreach ( $filter->args as $arg ) {
+				$args[] = $this->evaluate( $arg, $ctx );
+			}
+
+			$pipeline[] = [ $filter->name, $args ];
 		}
 
 		return $this->filtered( $value, $pipeline, $ctx );
@@ -451,7 +479,7 @@ final class Evaluator {
 		$fn = $this->asCallback( $callback, $ctx );
 		$out = [];
 		$i = 0;
-		foreach ( array_values( $object ) as $element ) {
+		foreach ( $object as $element ) {
 			$out[] = $fn( $element, $i++, $object );
 		}
 
@@ -466,7 +494,7 @@ final class Evaluator {
 		$fn = $this->asCallback( $callback, $ctx );
 		$out = [];
 		$i = 0;
-		foreach ( array_values( $object ) as $element ) {
+		foreach ( $object as $element ) {
 			if ( $this->truthy( $fn( $element, $i++, $object ) ) ) {
 				$out[] = $element;
 			}
@@ -481,7 +509,7 @@ final class Evaluator {
 	private function arrayFind( array $object, mixed $callback, Context $ctx ): mixed {
 		$fn = $this->asCallback( $callback, $ctx );
 		$i = 0;
-		foreach ( array_values( $object ) as $element ) {
+		foreach ( $object as $element ) {
 			if ( $this->truthy( $fn( $element, $i++, $object ) ) ) {
 				return $element;
 			}
@@ -497,7 +525,7 @@ final class Evaluator {
 	private function arraySome( array $object, mixed $callback, Context $ctx ): bool {
 		$fn = $this->asCallback( $callback, $ctx );
 		$i  = 0;
-		foreach ( array_values( $object ) as $element ) {
+		foreach ( $object as $element ) {
 			if ( $this->truthy( $fn( $element, $i++, $object ) ) ) {
 				return true;
 			}
@@ -513,7 +541,7 @@ final class Evaluator {
 	private function arrayEvery( array $object, mixed $callback, Context $ctx ): bool {
 		$fn = $this->asCallback( $callback, $ctx );
 		$i  = 0;
-		foreach ( array_values( $object ) as $element ) {
+		foreach ( $object as $element ) {
 			if ( ! $this->truthy( $fn( $element, $i++, $object ) ) ) {
 				return false;
 			}

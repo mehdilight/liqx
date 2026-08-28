@@ -51,6 +51,34 @@ final class ExpressionParser {
 		'undefined' => null,
 	];
 
+	/**
+	 * Binary/logical operator precedence, lowest binds loosest. One
+	 * precedence-climbing loop ({@see parseBinary}) replaces a seven-deep ladder
+	 * of near-identical methods — same tree, far fewer call frames per
+	 * expression.
+	 */
+	private const BINARY_PRECEDENCE = [
+		'||'  => 1,
+		'??'  => 2,
+		'&&'  => 3,
+		'=='  => 4,
+		'!='  => 4,
+		'===' => 4,
+		'!==' => 4,
+		'<'   => 5,
+		'>'   => 5,
+		'<='  => 5,
+		'>='  => 5,
+		'+'   => 6,
+		'-'   => 6,
+		'*'   => 7,
+		'/'   => 7,
+		'%'   => 7,
+	];
+
+	/** @var array<string, true> operators that build a {@see Logical} node. */
+	private const LOGICAL_OPERATORS = [ '||' => true, '&&' => true, '??' => true ];
+
 	public function __construct(
 		private readonly TokenStream $stream,
 	) {}
@@ -60,16 +88,20 @@ final class ExpressionParser {
 	// ---------------------------------------------------------------------
 
 	public function parse(): Expr {
-		$save = $this->stream->position();
-		$params = $this->tryArrowParams();
+		// An arrow starts only with `(` (param list) or a bare `identifier =>`.
+		// Skip the speculative param-parse + backtrack for anything else.
+		if ( $this->couldStartArrow() ) {
+			$save   = $this->stream->position();
+			$params = $this->tryArrowParams();
 
-		if ( null !== $params ) {
-			$this->stream->expect( TokenType::Arrow );
+			if ( null !== $params ) {
+				$this->stream->expect( TokenType::Arrow );
 
-			return new ArrowFunction( $params, $this->parseArrowBody() );
+				return new ArrowFunction( $params, $this->parseArrowBody() );
+			}
+
+			$this->stream->seek( $save );
 		}
-
-		$this->stream->seek( $save );
 
 		$value = $this->parseConditional();
 
@@ -183,7 +215,7 @@ final class ExpressionParser {
 	}
 
 	private function parseConditional(): Expr {
-		$test = $this->parseLogicalOr();
+		$test = $this->parseBinary( 1 );
 
 		if ( null !== $this->stream->acceptValue( TokenType::Operator, '?' ) ) {
 			$consequent = $this->parseAssignmentOrArrow();
@@ -198,105 +230,65 @@ final class ExpressionParser {
 
 	/** The middle of a ternary (or a nested arrow) — arrows need no parens. */
 	private function parseAssignmentOrArrow(): Expr {
-		$save = $this->stream->position();
-		$params = $this->tryArrowParams();
+		if ( $this->couldStartArrow() ) {
+			$save   = $this->stream->position();
+			$params = $this->tryArrowParams();
 
-		if ( null !== $params ) {
-			$this->stream->expect( TokenType::Arrow );
+			if ( null !== $params ) {
+				$this->stream->expect( TokenType::Arrow );
 
-			return new ArrowFunction( $params, $this->parseArrowBody() );
-		}
-
-		$this->stream->seek( $save );
-
-		return $this->parseLogicalOr();
-	}
-
-	private function parseLogicalOr(): Expr {
-		$left = $this->parseNullish();
-
-		while ( null !== $this->stream->acceptValue( TokenType::Operator, '||' ) ) {
-			$left = new Logical( '||', $left, $this->parseNullish() );
-		}
-
-		return $left;
-	}
-
-	private function parseNullish(): Expr {
-		$left = $this->parseLogicalAnd();
-
-		while ( null !== $this->stream->acceptValue( TokenType::Operator, '??' ) ) {
-			$left = new Logical( '??', $left, $this->parseLogicalAnd() );
-		}
-
-		return $left;
-	}
-
-	private function parseLogicalAnd(): Expr {
-		$left = $this->parseEquality();
-
-		while ( null !== $this->stream->acceptValue( TokenType::Operator, '&&' ) ) {
-			$left = new Logical( '&&', $left, $this->parseEquality() );
-		}
-
-		return $left;
-	}
-
-	private function parseEquality(): Expr {
-		$left = $this->parseRelational();
-
-		while ( true ) {
-			$token = $this->stream->current();
-			if ( null === $token || TokenType::Operator !== $token->type || ! in_array( $token->value, [ '==', '!=', '===', '!==' ], true ) ) {
-				break;
+				return new ArrowFunction( $params, $this->parseArrowBody() );
 			}
-			$this->stream->next();
-			$left = new Binary( $token->value, $left, $this->parseRelational() );
+
+			$this->stream->seek( $save );
 		}
 
-		return $left;
+		return $this->parseBinary( 1 );
 	}
 
-	private function parseRelational(): Expr {
-		$left = $this->parseAdditive();
+	/** Cheap gate before the speculative arrow-param parse + backtrack. */
+	private function couldStartArrow(): bool {
+		$token = $this->stream->current();
 
-		while ( true ) {
-			$token = $this->stream->current();
-			if ( null === $token || TokenType::Operator !== $token->type || ! in_array( $token->value, [ '<', '>', '<=', '>=' ], true ) ) {
-				break;
-			}
-			$this->stream->next();
-			$left = new Binary( $token->value, $left, $this->parseAdditive() );
+		if ( null === $token ) {
+			return false;
 		}
 
-		return $left;
-	}
-
-	private function parseAdditive(): Expr {
-		$left = $this->parseMultiplicative();
-
-		while ( true ) {
-			$token = $this->stream->current();
-			if ( null === $token || TokenType::Operator !== $token->type || ! in_array( $token->value, [ '+', '-' ], true ) ) {
-				break;
-			}
-			$this->stream->next();
-			$left = new Binary( $token->value, $left, $this->parseMultiplicative() );
+		if ( TokenType::OpenParen === $token->type ) {
+			return true;
 		}
 
-		return $left;
+		return TokenType::Identifier === $token->type
+			&& TokenType::Arrow === $this->stream->peek()?->type;
 	}
 
-	private function parseMultiplicative(): Expr {
+	/**
+	 * Precedence-climbing binary/logical parse. `$minPrec` is the lowest
+	 * precedence this call may consume; operators are left-associative, so the
+	 * right operand recurses at `prec + 1`.
+	 */
+	private function parseBinary( int $minPrec ): Expr {
 		$left = $this->parseUnary();
 
 		while ( true ) {
 			$token = $this->stream->current();
-			if ( null === $token || TokenType::Operator !== $token->type || ! in_array( $token->value, [ '*', '/', '%' ], true ) ) {
+
+			if ( null === $token || TokenType::Operator !== $token->type ) {
 				break;
 			}
+
+			$prec = self::BINARY_PRECEDENCE[ $token->value ] ?? 0;
+
+			if ( $prec < $minPrec ) {
+				break;
+			}
+
 			$this->stream->next();
-			$left = new Binary( $token->value, $left, $this->parseUnary() );
+			$right = $this->parseBinary( $prec + 1 );
+
+			$left = isset( self::LOGICAL_OPERATORS[ $token->value ] )
+				? new Logical( $token->value, $left, $right )
+				: new Binary( $token->value, $left, $right );
 		}
 
 		return $left;

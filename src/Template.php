@@ -14,6 +14,13 @@ final class Template {
 
 	private ?CompiledTemplate $compiled = null;
 
+	/** Shared, stateless AST walker — reused across renders in the process. */
+	private static ?Renderer $renderer = null;
+
+	private static function renderer(): Renderer {
+		return self::$renderer ??= new Renderer();
+	}
+
 	private function __construct(
 		private Environment $environment,
 		private string $source,
@@ -58,8 +65,56 @@ final class Template {
 		return is_file( $dir . '/' . $this->artifactKey() . '.php' );
 	}
 
+	private ?string $artifactKey = null;
+
 	private function artifactKey(): string {
-		return md5( 'template:' . Compiler::fingerprint() . ':' . $this->name . ':' . md5( $this->source ) );
+		return $this->artifactKey ??= md5(
+			'template:' . Compiler::fingerprint() . ':' . $this->name . ':' . md5( $this->source )
+		);
+	}
+
+	/**
+	 * Sidecar written next to the compiled artifact recording whether the source
+	 * declares a `<schema>` block. A warm cache reads this one byte instead of
+	 * re-parsing the whole document just to answer "does this need per-render
+	 * schema validation?".
+	 */
+	private function metaPath(): ?string {
+		$dir = $this->environment->compiledTemplateDir();
+
+		return null === $dir ? null : $dir . '/' . $this->artifactKey() . '.meta';
+	}
+
+	/**
+	 * Whether this template needs `<schema>` type validation on every render.
+	 * Answered from the sidecar when the artifact is already warm, so the common
+	 * (no-schema) case never touches the parser.
+	 */
+	private function requiresSchemaValidation(): bool {
+		if ( null !== $this->document ) {
+			return null !== $this->document->schema;
+		}
+
+		$meta = $this->metaPath();
+
+		if ( null !== $meta && is_file( $meta ) ) {
+			return '1' === @file_get_contents( $meta );
+		}
+
+		// No sidecar (a pre-sidecar artifact, or none yet) — parse once to be
+		// sure, and drop the sidecar so the next request skips this.
+		$document = $this->document();
+		$this->writeMeta( $document );
+
+		return null !== $document->schema;
+	}
+
+	private function writeMeta( Document $document ): void {
+		$meta = $this->metaPath();
+
+		if ( null !== $meta && ! is_file( $meta ) ) {
+			@file_put_contents( $meta, null !== $document->schema ? '1' : '0', LOCK_EX );
+		}
 	}
 
 	private static function parseDocument( string $source, string $name ): Document {
@@ -80,8 +135,10 @@ final class Template {
 
 	/** A copy with a name — hosts that load by name call this after caching. */
 	public function withName( string $name ): self {
-		$clone       = clone $this;
-		$clone->name = $name;
+		$clone              = clone $this;
+		$clone->name        = $name;
+		$clone->artifactKey = null;
+		$clone->compiled    = null;
 
 		return $clone;
 	}
@@ -110,18 +167,25 @@ final class Template {
 	 * scope (e.g. block children) on the context before rendering.
 	 */
 	public function renderContext( Context $context ): string {
+		if ( null !== $this->environment->compiledTemplateDir() ) {
+			// A warm artifact means the source already parsed and compiled once.
+			// Only re-parse when the template actually declares a `<schema>` and
+			// therefore needs per-render type validation.
+			if ( $this->requiresSchemaValidation() ) {
+				$this->validateFrontmatterTypes( $this->document(), $context );
+			}
+
+			return $this->compiled()->renderContext( $context );
+		}
+
 		$document = $this->document();
 
 		if ( null !== $document->schema ) {
 			$this->validateFrontmatterTypes( $document, $context );
 		}
 
-		if ( null !== $this->environment->compiledTemplateDir() ) {
-			return $this->compiled()->renderContext( $context );
-		}
-
 		try {
-			return ( new Renderer() )->render( $document, $context );
+			return self::renderer()->render( $document, $context );
 		} catch ( LiqxException $e ) {
 			if ( null === $e->templateName && '' !== $this->name ) {
 				$e->templateName = $this->name;
@@ -143,7 +207,7 @@ final class Template {
 		$document = $this->document();
 		$context  = new Context( $this->environment, $strict, $data );
 
-		$values = ( new Renderer() )->evaluateFrontmatter( $document, $context );
+		$values = self::renderer()->evaluateFrontmatter( $document, $context );
 
 		if ( null !== $document->schema ) {
 			( new SchemaValidator() )->validate( $document, $values );
@@ -153,7 +217,7 @@ final class Template {
 	}
 
 	private function validateFrontmatterTypes( Document $document, Context $context ): void {
-		$values = ( new Renderer() )->evaluateFrontmatter( $document, $context );
+		$values = self::renderer()->evaluateFrontmatter( $document, $context );
 
 		( new SchemaValidator() )->validate( $document, $values );
 	}
@@ -183,7 +247,12 @@ final class Template {
 			$dir,
 			$fileKey,
 			$this->name,
-			fn (): string => ( new Compiler() )->compile( $this->document() )
+			function (): string {
+				$document = $this->document();
+				$this->writeMeta( $document );
+
+				return ( new Compiler() )->compile( $document );
+			}
 		);
 	}
 

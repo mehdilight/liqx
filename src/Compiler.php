@@ -44,7 +44,7 @@ final class Compiler {
 	 * derive from the source hash alone) recompile instead of serving stale
 	 * PHP.
 	 */
-	public const VERSION = 2;
+	public const VERSION = 3;
 
 	/**
 	 * Guard against pathological deeply-nested templates exhausting the PHP
@@ -60,11 +60,18 @@ final class Compiler {
 	 * invalidates stale compiled templates without relying on anyone remembering
 	 * to bump `VERSION`.
 	 */
+	/** Memoized {@see fingerprint()} — the compiler source can't change mid-process. */
+	private static ?string $fingerprint = null;
+
 	public static function fingerprint(): string {
+		if ( null !== self::$fingerprint ) {
+			return self::$fingerprint;
+		}
+
 		$source = @file_get_contents( __DIR__ . '/Compiler.php' );
 		$hash   = false !== $source ? sha1( $source ) : (string) @filemtime( __DIR__ . '/Compiler.php' );
 
-		return self::VERSION . ':' . $hash;
+		return self::$fingerprint = self::VERSION . ':' . $hash;
 	}
 
 	/**
@@ -776,7 +783,7 @@ final class Compiler {
 		$right = $this->expr( $expression->right, $lenient );
 
 		return match ( $expression->op ) {
-			'+'   => '( ( is_string( ' . $left . ' ) || is_string( ' . $right . ' ) ) ? ( (string) ' . $left . ' . (string) ' . $right . ' ) : ( $eval->toNumber( ' . $left . ' ) + $eval->toNumber( ' . $right . ' ) ) )',
+			'+'   => '( $eval->add( ' . $left . ', ' . $right . ' ) )',
 			'-'   => '( $eval->toNumber( ' . $left . ' ) - $eval->toNumber( ' . $right . ' ) )',
 			'*'   => '( $eval->toNumber( ' . $left . ' ) * $eval->toNumber( ' . $right . ' ) )',
 			'/'   => '( $eval->toNumber( ' . $left . ' ) / $eval->toNumber( ' . $right . ' ) )',
@@ -797,19 +804,24 @@ final class Compiler {
 		$left  = $this->expr( $expression->left, $lenient );
 		$right = $this->expr( $expression->right, $lenient );
 
+		// Each short-circuit form binds its left operand to a temp so a method
+		// call or property read on that side runs once, not twice, while the
+		// right operand stays lazily evaluated.
+		$tmp = '$' . $this->freshVar();
+
 		if ( '??' === $expression->op ) {
 			// The interpreter evaluates the left side leniently — a missing
 			// variable collapses to null instead of throwing.
 			$lenientLeft = $this->expr( $expression->left, true );
 
-			return '( ( ' . $lenientLeft . ' === null ) ? ' . $right . ' : ' . $lenientLeft . ' )';
+			return '( ( ( ' . $tmp . ' = ' . $lenientLeft . ' ) === null ) ? ' . $right . ' : ' . $tmp . ' )';
 		}
 
 		if ( '||' === $expression->op ) {
-			return '( $eval->truthy( ' . $left . ' ) ? ' . $left . ' : ' . $right . ' )';
+			return '( $eval->truthy( ' . $tmp . ' = ' . $left . ' ) ? ' . $tmp . ' : ' . $right . ' )';
 		}
 
-		return '( $eval->truthy( ' . $left . ' ) ? ' . $right . ' : ' . $left . ' )';
+		return '( $eval->truthy( ' . $tmp . ' = ' . $left . ' ) ? ' . $right . ' : ' . $tmp . ' )';
 	}
 
 	private function filtered( Filtered $expression, bool $lenient ): string {
