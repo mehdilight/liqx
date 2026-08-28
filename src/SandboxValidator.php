@@ -30,8 +30,8 @@ use Phpmystic\Liqx\Node\FrontmatterDestructure;
  *
  *   - dangerous globals / callables (eval, Function, window, process, …);
  *   - `constructor` / `__proto__` / `prototype` property access;
- *   - arrow functions not used as a `.map()` / `.filter()` / `.find()` callback
- *     (no arbitrary function definitions);
+ *   - arrow functions not used as a `.map()` / `.filter()` / `.find()` /
+ *     `.some()` / `.every()` callback (no arbitrary function definitions);
  *   - JSX elements (markup belongs in the render body).
  *
  * Runs at parse time, so a bad `.liqx` file fails before it ever compiles.
@@ -44,7 +44,7 @@ final class SandboxValidator {
 		'prompt', 'constructor', '__proto__', 'prototype',
 	];
 
-	private const COLLECTION_CALLBACKS = [ 'map', 'filter', 'find' ];
+	private const COLLECTION_CALLBACKS = [ 'map', 'filter', 'find', 'some', 'every' ];
 
 	public function validateDeclaration( Frontmatter|FrontmatterDestructure $declaration ): void {
 		$line = $declaration->line;
@@ -62,6 +62,15 @@ final class SandboxValidator {
 		}
 
 		$this->validateExpr( $declaration->expr, arrowsAllowed: false, line: $line );
+	}
+
+	/**
+	 * Validate the frontmatter `return <expr>;` — the expression that becomes the
+	 * body's `props`. It may reference data/consts and use globals + filters, but
+	 * must not smuggle markup (JSX) or arbitrary functions into the props.
+	 */
+	public function validateExported( Expr $expr, int $line ): void {
+		$this->validateExpr( $expr, arrowsAllowed: false, line: $line );
 	}
 
 	private function validateExpr( Expr $expr, bool $arrowsAllowed, int $line ): void {

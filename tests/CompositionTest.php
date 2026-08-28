@@ -221,8 +221,6 @@ final class CompositionTest extends TestCase {
 
 	public function testPrivatePropertiesFallThroughToBeforeMethod(): void {
 		$drop = new class {
-			private string $locale = 'hidden';
-
 			public function beforeMethod( string $method ): mixed {
 				return 'locale' === $method ? 'fr' : null;
 			}

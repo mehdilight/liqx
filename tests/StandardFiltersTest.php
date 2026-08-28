@@ -25,6 +25,11 @@ final class StandardFiltersTest extends TestCase {
 		return Template::parse( '{' . $expr . '}', $this->env )->render( $data );
 	}
 
+	/** @param array<string, mixed> $data */
+	private function render( string $source, array $data = [] ): string {
+		return Template::parse( $source, $this->env )->render( $data );
+	}
+
 	public function testStringCaseFilters(): void {
 		$this->assertSame( 'HELLO', $this->pipe( 'x | upcase', [ 'x' => 'hello' ] ) );
 		$this->assertSame( 'hello', $this->pipe( 'x | downcase', [ 'x' => 'HeLLo' ] ) );
@@ -79,6 +84,20 @@ final class StandardFiltersTest extends TestCase {
 		$this->assertSame( 'ell', $this->pipe( 'x | slice(1, 3)', [ 'x' => 'hello' ] ) );
 		$this->assertSame( 'cba', $this->pipe( 'x | reverse', [ 'x' => 'abc' ] ) );
 	}
+
+	public function testSlugifyFilter(): void {
+		$this->assertSame( 'hello-world', $this->pipe( 'x | slugify', [ 'x' => 'Hello, World!' ] ) );
+		$this->assertSame( 'a-b-c', $this->pipe( 'x | slugify', [ 'x' => 'A B _ C' ] ) );
+		$this->assertSame( '', $this->pipe( 'x | slugify', [ 'x' => '!!' ] ) );
+	}
+
+	public function testStringFiltersUsableInFrontmatter(): void {
+		$source = "---\nconst title = block.title | capitalize;\nconst handle = block.title | slugify;\nconst words = block.tags | split(',');\n---\n{title}|{handle}|{words.length}";
+		$data   = [ 'block' => [ 'title' => 'hello world', 'tags' => 'a,b,c' ] ];
+
+		$this->assertSame( 'Hello world|hello-world|3', $this->render( $source, $data ) );
+	}
+
 
 	public function testSortingFilters(): void {
 		$this->assertSame( '123', $this->pipe( 'x | sort | join("")', [ 'x' => [ 3, 1, 2 ] ] ) );

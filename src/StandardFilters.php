@@ -56,6 +56,7 @@ final class StandardFilters {
 			'rstrip'          => [ self::class, 'rstrip' ],
 			'size'            => [ self::class, 'size' ],
 			'slice'           => [ self::class, 'slice' ],
+			'slugify'         => [ self::class, 'slugify' ],
 			'sort'            => [ self::class, 'sort' ],
 			'sort_natural'    => [ self::class, 'sortNatural' ],
 			'split'           => [ self::class, 'split' ],
@@ -255,6 +256,26 @@ final class StandardFilters {
 		$string = (string) $value;
 
 		return abs( (int) $offset ) >= mb_strlen( $string ) ? '' : mb_substr( $string, (int) $offset, (int) $length );
+	}
+
+	/**
+	 * Lowercase, ASCII-fold, and join word-runs with `-`. Produces a URL/handle-
+	 * safe slug from arbitrary text (accents → ASCII, punctuation dropped).
+	 */
+	public static function slugify( mixed $value ): string {
+		$slug = (string) $value;
+		$slug = mb_strtolower( $slug );
+		$slug = strtr( $slug, [
+			'à' => 'a', 'á' => 'a', 'â' => 'a', 'ã' => 'a', 'ä' => 'a', 'å' => 'a',
+			'ç' => 'c', 'è' => 'e', 'é' => 'e', 'ê' => 'e', 'ë' => 'e',
+			'ì' => 'i', 'í' => 'i', 'î' => 'i', 'ï' => 'i',
+			'ñ' => 'n', 'ò' => 'o', 'ó' => 'o', 'ô' => 'o', 'õ' => 'o', 'ö' => 'o',
+			'ù' => 'u', 'ú' => 'u', 'û' => 'u', 'ü' => 'u',
+			'ý' => 'y', 'ÿ' => 'y', 'ß' => 'ss',
+		] );
+		$slug = preg_replace( '/[^a-z0-9]+/', '-', $slug ) ?? '';
+
+		return trim( $slug, '-' );
 	}
 
 	public static function remove( mixed $value, mixed $needle = '' ): string {

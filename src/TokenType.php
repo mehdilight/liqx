@@ -35,6 +35,7 @@ enum TokenType: string {
 	case String          = 'string';
 	case TemplateString  = 'template_string';
 	case Dot             = 'dot';
+	case NullSafe        = 'null_safe'; // `?.` optional property access
 	case Comma           = 'comma';
 	case Colon           = 'colon';
 	case Semicolon       = 'semicolon';

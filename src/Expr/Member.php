@@ -15,5 +15,6 @@ final class Member implements Expr {
 		public readonly Expr $object,
 		public readonly string|Expr $access,
 		public readonly bool $computed = false,
+		public readonly bool $nullSafe = false,
 	) {}
 }

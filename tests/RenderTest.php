@@ -31,6 +31,85 @@ final class RenderTest extends TestCase {
 		);
 	}
 
+	public function testNullSafePropertyReturnsEmptyOnMissingObject(): void {
+		$this->assertSame( '<p></p>', $this->render( '<p>{product?.title}</p>', [] ) );
+	}
+
+	public function testNullSafePropertyResolvesWhenPresent(): void {
+		$this->assertSame(
+			'<p>Widget</p>',
+			$this->render( '<p>{product?.title}</p>', [ 'product' => [ 'title' => 'Widget' ] ] )
+		);
+	}
+
+	public function testNullSafeChainingShortCircuits(): void {
+		// `a` is missing, so `?.b` short-circuits to null and `.c` is never read.
+		// A plain `.b.c` on a missing `a` would throw in strict mode.
+		$this->assertSame( '<p></p>', $this->render( '<p>{a?.b.c}</p>', [], strict: true ) );
+	}
+
+	public function testNullSafeOnExistingNullData(): void {
+		$this->assertSame( '<p></p>', $this->render( '<p>{product?.title}</p>', [ 'product' => null ], strict: true ) );
+	}
+
+	public function testNullSafeComputedProperty(): void {
+		$this->assertSame(
+			'<p>Widget</p>',
+			$this->render( '<p>{product?.[key]}</p>', [ 'product' => [ 'title' => 'Widget' ], 'key' => 'title' ] )
+		);
+		$this->assertSame( '<p></p>', $this->render( '<p>{product?.[key]}</p>', [ 'key' => 'title' ] ) );
+	}
+
+	public function testNullSafeInFrontmatter(): void {
+		$source = "---\nconst title = product?.title ?? 'Fallback';\n---\n<h1>{title}</h1>";
+
+		$this->assertSame( '<h1>Fallback</h1>', $this->render( $source, [] ) );
+		$this->assertSame( '<h1>Widget</h1>', $this->render( $source, [ 'product' => [ 'title' => 'Widget' ] ] ) );
+	}
+
+	public function testCollectionPredicateMethodsInFrontmatter(): void {
+		$source = "---\nconst items = [ { active: true }, { active: false } ];\nconst hasActive = items.some(i => i.active);\nconst allActive = items.every(i => i.active);\nconst none = [].some(i => i.active);\n---\n{hasActive}|{allActive}|{none}";
+
+		// `false` interpolates as empty (Liquid semantics); `true` as "true".
+		$this->assertSame( 'true||', $this->render( $source, [] ) );
+	}
+
+	public function testFrontmatterReturnExposesProps(): void {
+		$source = "---\nconst title = block.title | default('Hello');\nconst count = 3;\nreturn { title: title, count: count, items: [ 1, 2 ] };\n---\n<h1>{props.title}</h1><span>{props.count}</span><b>{props.items.length}</b>";
+
+		$this->assertSame(
+			'<h1>Hello</h1><span>3</span><b>2</b>',
+			$this->render( $source, [] )
+		);
+	}
+
+	public function testFrontmatterReturnMustBeLast(): void {
+		$source = "---\nreturn { a: 1 };\nconst x = 2;\n---\n<p>{x}</p>";
+
+		$this->expectException( \Phpmystic\Liqx\SyntaxException::class );
+
+		$this->render( $source, [] );
+	}
+
+	public function testFrontmatterReturnRejectsJsx(): void {
+		$source = '---' . "\n" . 'return <p>nope</p>;' . "\n" . '---' . "\n" . '<span/>';
+
+		$this->expectException( \Phpmystic\Liqx\SyntaxException::class );
+
+		$this->render( $source, [] );
+	}
+
+	public function testCollectionPredicateMethodsOnData(): void {
+		$this->assertSame(
+			'<p>yes</p>',
+			$this->render( '<p>{items.some(i => i.active) ? "yes" : "no"}</p>', [ 'items' => [ [ 'active' => true ], [ 'active' => false ] ] ] )
+		);
+		$this->assertSame(
+			'<p>no</p>',
+			$this->render( '<p>{items.every(i => i.active) ? "yes" : "no"}</p>', [ 'items' => [ [ 'active' => true ], [ 'active' => false ] ] ] )
+		);
+	}
+
 	public function testAttributeExpressionValue(): void {
 		$this->assertSame(
 			'<img src="/a.jpg" />',

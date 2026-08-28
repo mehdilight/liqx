@@ -12,10 +12,11 @@ use Phpmystic\Liqx\Node\Style;
 /**
  * Document-level parser. Reads the flat token stream produced by the Lexer
  * and builds a Document AST: an optional frontmatter block (restricted JS
- * declarations) followed by the render body, plus optional `<style>` and
+ * declarations, plus an optional final `return <expr>;` that becomes the
+ * body's `props`) followed by the render body, plus optional `<style>` and
  * `<schema>` blocks.
  */
-final class Parser {
+	final class Parser {
 
 	private TokenStream $stream;
 
@@ -23,12 +24,16 @@ final class Parser {
 
 	private SandboxValidator $sandbox;
 
+	/** The frontmatter `return <expr>;`, if the document ends its frontmatter with one. */
+	private ?Expr $frontmatterReturn = null;
+
 	public function parse( string $source ): Document {
 		$stream = ( new Lexer() )->tokenize( $source );
 
 		$this->stream = $stream;
 		$this->expr   = new ExpressionParser( $stream );
 		$this->sandbox = new SandboxValidator();
+		$this->frontmatterReturn = null;
 
 		$frontmatter = $this->parseFrontmatter();
 
@@ -56,7 +61,7 @@ final class Parser {
 			}
 		}
 
-		return new Document( $frontmatter, $body, $style, $schema );
+		return new Document( $frontmatter, $body, $style, $schema, $this->frontmatterReturn );
 	}
 
 	/** @return list<Frontmatter|FrontmatterDestructure> */
@@ -68,6 +73,27 @@ final class Parser {
 		$declarations = [];
 
 		while ( null === $this->stream->accept( TokenType::FrontmatterEnd ) ) {
+			$keyword = $this->stream->current();
+
+			if ( null !== $keyword && TokenType::Keyword === $keyword->type && 'return' === $keyword->value ) {
+				$this->stream->next();
+
+				$return = $this->expr->parse();
+				$this->sandbox->validateExported( $return, $keyword->line );
+				$this->stream->accept( TokenType::Semicolon );
+
+				// A `return` must be the final frontmatter declaration, so the
+				// very next token must be the `---` that ends the block.
+				if ( TokenType::FrontmatterEnd !== $this->stream->current()?->type ) {
+					throw new SyntaxException( 'A `return` statement must be the last frontmatter declaration', $keyword->line );
+				}
+
+				$this->frontmatterReturn = $return;
+				$this->stream->next();
+
+				break;
+			}
+
 			$declaration = $this->expr->parseDeclaration();
 			$this->sandbox->validateDeclaration( $declaration );
 			$declarations[] = $declaration;

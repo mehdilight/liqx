@@ -85,6 +85,11 @@ final class Renderer {
 			}
 		}
 
+		// A final `return { … };` becomes the body's `props`.
+		if ( null !== $document->frontmatterReturn ) {
+			$ctx->set( 'props', $this->evaluator->evaluate( $document->frontmatterReturn, $ctx ) );
+		}
+
 		foreach ( $document->body as $node ) {
 			$out .= $this->renderNode( $node, $ctx );
 		}

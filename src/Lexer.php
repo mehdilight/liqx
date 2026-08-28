@@ -64,6 +64,7 @@ final class Lexer {
 	private int $jsBraceDepth = 0;
 
 	/** Outer brace depths awaiting restore when a `{…}` expression closes. */
+	/** @var list<int> */
 	private array $jsBraceDepthStack = [];
 
 	/** In Js mode: is the next token an operand (vs. postfix)? */
@@ -512,6 +513,16 @@ final class Lexer {
 			return;
 		}
 
+		// Optional property access `?.` — distinct from the ternary `?` and the
+		// nullish-coalescing `??`.
+		if ( '?' === $char && '.' === $next ) {
+			$this->push( TokenType::NullSafe, '?.', $this->line );
+			$this->cursor += 2;
+			$this->expectOperand = false;
+
+			return;
+		}
+
 		$two = substr( $this->source, $this->cursor, 2 );
 		$three = substr( $this->source, $this->cursor, 3 );
 
@@ -853,16 +864,6 @@ final class Lexer {
 			'return', 'typeof', 'new', 'throw', 'void', 'delete',
 			'in', 'instanceof', 'yield', 'await', 'case',
 		], true );
-	}
-
-	private function hasFromJsTag(): bool {
-		foreach ( $this->tagStack as $entry ) {
-			if ( $entry['fromJs'] ) {
-				return true;
-			}
-		}
-
-		return false;
 	}
 
 	private function push( TokenType $type, string $value, int $line ): void {

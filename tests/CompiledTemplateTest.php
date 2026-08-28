@@ -273,6 +273,54 @@ final class CompiledTemplateTest extends TestCase {
 		$this->render( $source, [] );
 	}
 
+	public function testNullSafeNavigationParity(): void {
+		$data = [ 'product' => [ 'title' => 'Widget' ] ];
+
+		$this->assertParity( '<p>{product?.title}</p>', $data );
+		$this->assertParity( '<p>{product?.title}</p>', [] );
+		$this->assertParity( '<p>{missing?.title}</p>', $data, strict: true );
+		$this->assertParity( '<p>{missing?.a.b.c}</p>', $data, strict: true );
+		$this->assertParity( '<p>{product?.["title"]}</p>', $data, strict: true );
+		$this->assertParity( '<p>{a?.b ?? "default"}</p>', [ 'a' => [ 'b' => null ] ], strict: true );
+	}
+
+	public function testStaticFrontmatterConstsAreFoldedAtCompileTime(): void {
+		$source = "---\nconst base = 100;\nconst tax = base * 2;\n---\n<p>{tax}</p>";
+
+		$doc = ( new \Phpmystic\Liqx\Parser() )->parse( $source );
+		$php = ( new \Phpmystic\Liqx\Compiler() )->compile( $doc );
+
+		// A chain of static consts is resolved to a single literal at compile
+		// time — the runtime must not recompute `base * 2` on every render.
+		$this->assertStringContainsString( "set( 'tax', 200 );", $php );
+		$this->assertStringNotContainsString( ' * 2', $php );
+
+		// Object/array literal trees fold to PHP literals (no per-invocation eval).
+		$obj   = "---\nconst links = [ { url: '/a', label: 'A' }, { url: '/b', label: 'B' } ];\n---\n{links.length}";
+		$objDoc = ( new \Phpmystic\Liqx\Parser() )->parse( $obj );
+		$objPhp = ( new \Phpmystic\Liqx\Compiler() )->compile( $objDoc );
+		$this->assertStringNotContainsString( " '[", $objPhp );
+
+		// Parity must hold: folded output is observably identical.
+		$this->assertParity( $source, [] );
+		$this->assertParity( $obj, [] );
+	}
+
+	public function testCollectionPredicateMethodsParity(): void {
+		$data = [ 'items' => [ [ 'active' => true ], [ 'active' => false ], [ 'active' => true ] ] ];
+
+		$this->assertParity( '<p>{items.some(i => i.active)}</p>', $data );
+		$this->assertParity( '<p>{items.every(i => i.active)}</p>', $data );
+		$this->assertParity( '<p>{"a".split(",").length}</p>', [] );
+	}
+
+	public function testFrontmatterReturnPropsParity(): void {
+		$source = "---\nconst title = block.title | default('Hello');\nconst count = 3;\nreturn { title: title, count: count };\n---\n<h1>{props.title}</h1><span>{props.count}</span>";
+
+		$this->assertParity( $source, [ 'block' => [ 'title' => 'Hi' ] ] );
+		$this->assertParity( $source, [] );
+	}
+
 	public function testClearCompiledTemplatesRemovesArtifacts(): void {
 		$this->render( '<p>{name}</p>', [ 'name' => 'Ada' ] );
 		$this->assertNotEmpty( glob( $this->cacheDir . '/*.php' ) ?: [] );

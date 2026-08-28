@@ -127,6 +127,15 @@ final class Compiler {
 	/** Current expression-nesting depth, guarded by {@see self::MAX_NESTING}. */
 	private int $exprDepth = 0;
 
+	/**
+	 * Names of frontmatter consts already resolved to a compile-time literal
+	 * value this compile. Because declarations run in order, a later static
+	 * const can reference an earlier one.
+	 *
+	 * @var array<string, mixed>
+	 */
+	private array $staticConsts = [];
+
 	private function freshVar(): string {
 		return '__v' . ( $this->varCounter++ );
 	}
@@ -160,6 +169,7 @@ final class Compiler {
 	}
 
 	public function compile( Document $document ): string {
+		$this->staticConsts = [];
 		$lines = [];
 
 		$lines[] = '<?php';
@@ -175,6 +185,11 @@ final class Compiler {
 			foreach ( $this->declarationLines( $declaration ) as $line ) {
 				$lines[] = '        ' . $line;
 			}
+		}
+
+		// A frontmatter `return { … };` becomes the body's `props`.
+		if ( null !== $document->frontmatterReturn ) {
+			$lines[] = '        $ctx->set( \'props\', ' . $this->expr( $document->frontmatterReturn ) . ' );';
 		}
 
 		foreach ( $this->nodeStatements( $document->body, '        ' ) as $statement ) {
@@ -200,6 +215,7 @@ final class Compiler {
 	 */
 	private function declarationLines( Frontmatter|FrontmatterDestructure $declaration ): array {
 		if ( $declaration instanceof FrontmatterDestructure ) {
+			// Destructuring reads data at runtime — never static.
 			$lines = [ '$__src = ' . $this->expr( $declaration->init ) . ';' ];
 
 			foreach ( $declaration->bindings as $binding ) {
@@ -212,7 +228,159 @@ final class Compiler {
 			return $lines;
 		}
 
+		// A static `const x = <literal-tree>` is folded once at compile time and
+		// baked into the artifact as a literal, so the render loop never
+		// recomputes it. Non-static consts fall through to a runtime `$ctx->set`.
+		$static = $this->tryStaticValue( $declaration->expr );
+
+		if ( $static['folded'] ) {
+			$this->staticConsts[ $declaration->name ] = $static['value'];
+
+			return [ '$ctx->set( ' . var_export( $declaration->name, true ) . ', ' . var_export( $static['value'], true ) . ' );' ];
+		}
+
+		unset( $this->staticConsts[ $declaration->name ] );
+
 		return [ '$ctx->set( ' . var_export( $declaration->name, true ) . ', ' . $this->expr( $declaration->expr ) . ' );' ];
+	}
+
+	/**
+	 * Evaluate a frontmatter expression at compile time. Returns `folded: false`
+	 * for anything that depends on render data or whose semantics PHP can't
+	 * reproduce exactly (loose equality, JS truthiness), keeping this strictly
+	 * parity-safe.
+	 *
+	 * @return array{folded: bool, value: mixed}
+	 */
+	private function tryStaticValue( Expr $expr ): array {
+		if ( $expr instanceof Literal ) {
+			return [ 'folded' => true, 'value' => $expr->value ];
+		}
+
+		if ( $expr instanceof Identifier ) {
+			if ( ! array_key_exists( $expr->name, $this->staticConsts ) ) {
+				return [ 'folded' => false, 'value' => null ];
+			}
+
+			return [ 'folded' => true, 'value' => $this->staticConsts[ $expr->name ] ];
+		}
+
+		if ( $expr instanceof ArrayLit ) {
+			$values = [];
+
+			foreach ( $expr->elements as $element ) {
+				$folded = $this->tryStaticValue( $element );
+
+				if ( ! $folded['folded'] ) {
+					return [ 'folded' => false, 'value' => null ];
+				}
+
+				$values[] = $folded['value'];
+			}
+
+			return [ 'folded' => true, 'value' => $values ];
+		}
+
+		if ( $expr instanceof ObjectLit ) {
+			$values = [];
+
+			foreach ( $expr->properties as [ $key, $value ] ) {
+				$folded = $this->tryStaticValue( $value );
+
+				if ( ! $folded['folded'] ) {
+					return [ 'folded' => false, 'value' => null ];
+				}
+
+				$values[ $key ] = $folded['value'];
+			}
+
+			return [ 'folded' => true, 'value' => $values ];
+		}
+
+		if ( $expr instanceof TemplateString ) {
+			$out = '';
+
+			foreach ( $expr->parts as $part ) {
+				if ( is_string( $part ) ) {
+					$out .= $part;
+
+					continue;
+				}
+
+				$folded = $this->tryStaticValue( $part );
+
+				if ( ! $folded['folded'] ) {
+					return [ 'folded' => false, 'value' => null ];
+				}
+
+				// Template interpolation renders via stringify; fold only scalar
+				// interpolations that stringify identically.
+				if ( ! is_scalar( $folded['value'] ) && null !== $folded['value'] ) {
+					return [ 'folded' => false, 'value' => null ];
+				}
+
+				$out .= $folded['value'];
+			}
+
+			return [ 'folded' => true, 'value' => $out ];
+		}
+
+		if ( $expr instanceof Unary ) {
+			$folded = $this->tryStaticValue( $expr->operand );
+
+			if ( ! $folded['folded'] ) {
+				return [ 'folded' => false, 'value' => null ];
+			}
+
+			return match ( $expr->op ) {
+				'-' => is_int( $folded['value'] ) || is_float( $folded['value'] )
+					? [ 'folded' => true, 'value' => -$folded['value'] ]
+					: [ 'folded' => false, 'value' => null ],
+				'+' => is_int( $folded['value'] ) || is_float( $folded['value'] )
+					? [ 'folded' => true, 'value' => +$folded['value'] ]
+					: [ 'folded' => false, 'value' => null ],
+				'!' => is_bool( $folded['value'] )
+					? [ 'folded' => true, 'value' => ! $folded['value'] ]
+					: [ 'folded' => false, 'value' => null ],
+				default => [ 'folded' => false, 'value' => null ],
+			};
+		}
+
+		if ( $expr instanceof Binary ) {
+			$left  = $this->tryStaticValue( $expr->left );
+			$right = $this->tryStaticValue( $expr->right );
+
+			if ( ! $left['folded'] || ! $right['folded'] ) {
+				return [ 'folded' => false, 'value' => null ];
+			}
+
+			// Numeric arithmetic folds only when both operands are numeric, where
+			// Liqx's `toNumber` is the identity and PHP's `+ - * / %` agree.
+			if ( in_array( $expr->op, [ '+', '-', '*', '/', '%' ], true ) ) {
+				if ( ! ( is_int( $left['value'] ) || is_float( $left['value'] ) ) || ! ( is_int( $right['value'] ) || is_float( $right['value'] ) ) ) {
+					return [ 'folded' => false, 'value' => null ];
+				}
+
+				return [ 'folded' => true, 'value' => match ( $expr->op ) {
+					'+' => $left['value'] + $right['value'],
+					'-' => $left['value'] - $right['value'],
+					'*' => $left['value'] * $right['value'],
+					'/' => $left['value'] / $right['value'],
+					'%' => $left['value'] % $right['value'],
+				} ];
+			}
+
+			// Strict identity — PHP `===`/`!==` match Liqx exactly on scalars.
+			if ( '===' === $expr->op || '!==' === $expr->op ) {
+				$identical = $left['value'] === $right['value'];
+
+				return [ 'folded' => true, 'value' => '===' === $expr->op ? $identical : ! $identical ];
+			}
+
+			return [ 'folded' => false, 'value' => null ];
+		}
+
+		return [ 'folded' => false, 'value' => null ];
 	}
 
 	/**
@@ -430,7 +598,13 @@ final class Compiler {
 	 */
 	private function expr( Expr $expression, bool $lenient = false ): string {
 		if ( ++$this->exprDepth > self::MAX_NESTING ) {
-			throw new LiqxException( 'Template nesting exceeds the compiler depth limit (' . self::MAX_NESTING . ')' );
+			throw new LiqxException(
+				'Template nesting exceeds the compiler depth limit ('
+				. self::MAX_NESTING
+				. '). This usually means the source is deeply/recursively nested — '
+				. 'flatten deeply-chained helper expressions or break them into '
+				. 'frontmatter constants.'
+			);
 		}
 
 		try {
@@ -464,8 +638,6 @@ final class Compiler {
 		}
 
 		if ( $expression instanceof Member ) {
-			$object = $this->expr( $expression->object, $lenient );
-
 			if ( $expression->computed ) {
 				if ( ! $expression->access instanceof Expr ) {
 					throw new LiqxException( 'Compile error: computed member access is not an expression' );
@@ -475,6 +647,17 @@ final class Compiler {
 			} else {
 				$key = var_export( (string) $expression->access, true );
 			}
+
+			if ( $expression->nullSafe ) {
+				// `a?.b` — evaluate the object leniently (undefined → null) and
+				// short-circuit to null, never reading a member off null.
+				$object = $this->expr( $expression->object, true );
+				$var    = $this->freshVar();
+
+				return '( ( ( $' . $var . ' = ' . $object . ' ) === null ) ? null : $eval->getProperty( $' . $var . ', ' . $key . ' ) )';
+			}
+
+			$object = $this->expr( $expression->object, $lenient );
 
 			return '( $eval->getProperty( ' . $object . ', ' . $key . ' ) )';
 		}

@@ -137,6 +137,10 @@ final class Evaluator {
 	}
 
 	private function evalMember( Member $expr, Context $ctx ): mixed {
+		if ( $expr->nullSafe ) {
+			return $this->evalNullSafeMember( $expr, $ctx );
+		}
+
 		$object = $this->evaluate( $expr->object, $ctx );
 
 		if ( $expr->computed ) {
@@ -146,6 +150,32 @@ final class Evaluator {
 		}
 
 		return $this->getProperty( $object, $key );
+	}
+
+	/**
+	 * Optional property access `a?.b`. If the object is undefined in strict mode
+	 * (or null), the whole expression short-circuits to `null` without reading
+	 * any further member — mirroring `??`-style leniency for the object side.
+	 */
+	private function evalNullSafeMember( Member $expr, Context $ctx ): mixed {
+		$object = $this->evaluateLenient( $expr->object, $ctx );
+
+		if ( null === $object ) {
+			return null;
+		}
+
+		$key = $expr->computed ? $this->evaluate( $expr->access, $ctx ) : $expr->access;
+
+		return $this->getProperty( $object, $key );
+	}
+
+	/** Evaluate an expression in strict-lenient mode — missing variables yield null. */
+	private function evaluateLenient( Expr $expr, Context $ctx ): mixed {
+		try {
+			return $this->evaluate( $expr, $ctx );
+		} catch ( UndefinedVariableException ) {
+			return null;
+		}
 	}
 
 	private function evalCall( Call $expr, Context $ctx ): mixed {
@@ -343,7 +373,12 @@ final class Evaluator {
 		// loop, and themes write `{collection.products.map(...)}` where the
 		// collection may be absent.
 		if ( null === $object ) {
-			return in_array( $method, [ 'map', 'filter', 'find' ], true ) ? [] : null;
+			return match ( $method ) {
+				'map', 'filter', 'find' => [],
+				'some'                   => false,
+				'every'                  => true,
+				default                  => null,
+			};
 		}
 
 		if ( is_array( $object ) ) {
@@ -378,6 +413,8 @@ final class Evaluator {
 			'map'    => $this->arrayMap( $object, $args[0] ?? null, $ctx ),
 			'filter' => $this->arrayFilter( $object, $args[0] ?? null, $ctx ),
 			'find'   => $this->arrayFind( $object, $args[0] ?? null, $ctx ),
+			'some'   => $this->arraySome( $object, $args[0] ?? null, $ctx ),
+			'every'  => $this->arrayEvery( $object, $args[0] ?? null, $ctx ),
 			'join'   => implode( (string) ( $args[0] ?? '' ), array_values( $object ) ),
 			'includes' => in_array( $args[0] ?? null, $object, true ),
 			'concat'   => array_merge( $object, is_array( $args[0] ?? null ) ? $args[0] : [] ),
@@ -451,6 +488,38 @@ final class Evaluator {
 		}
 
 		return null;
+	}
+
+	/**
+	 * `some` — any element passes the predicate (empty → false, like JS).
+	 * @param array<mixed> $object
+	 */
+	private function arraySome( array $object, mixed $callback, Context $ctx ): bool {
+		$fn = $this->asCallback( $callback, $ctx );
+		$i  = 0;
+		foreach ( array_values( $object ) as $element ) {
+			if ( $this->truthy( $fn( $element, $i++, $object ) ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * `every` — all elements pass the predicate (empty → true, like JS).
+	 * @param array<mixed> $object
+	 */
+	private function arrayEvery( array $object, mixed $callback, Context $ctx ): bool {
+		$fn = $this->asCallback( $callback, $ctx );
+		$i  = 0;
+		foreach ( array_values( $object ) as $element ) {
+			if ( ! $this->truthy( $fn( $element, $i++, $object ) ) ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	/** @param array<mixed> $object */

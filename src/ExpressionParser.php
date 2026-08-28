@@ -339,6 +339,25 @@ final class ExpressionParser {
 				continue;
 			}
 
+			if ( null !== $this->stream->accept( TokenType::NullSafe ) ) {
+				if ( null !== $this->stream->accept( TokenType::OpenBracket ) ) {
+					$index = $this->parse();
+					$this->stream->expect( TokenType::CloseBracket );
+					$expr = new Member( $expr, $index, computed: true, nullSafe: true );
+
+					continue;
+				}
+
+				$token = $this->stream->accept( TokenType::Identifier ) ?? $this->stream->accept( TokenType::Keyword );
+				if ( null === $token ) {
+					throw new SyntaxException( 'Expected property name after `?.`', $this->stream->current()?->line );
+				}
+
+				$expr = new Member( $expr, $token->value, nullSafe: true );
+
+				continue;
+			}
+
 			if ( null !== $this->stream->accept( TokenType::OpenBracket ) ) {
 				$index = $this->parse();
 				$this->stream->expect( TokenType::CloseBracket );
