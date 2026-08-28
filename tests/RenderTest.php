@@ -139,6 +139,39 @@ final class RenderTest extends TestCase {
 		$this->render( $source, [] );
 	}
 
+	public function testDynamicComputedPropertyAccessInFrontmatter(): void {
+		$source = "---\nconst key = 'title';\nconst t = product[key];\n---\n<h1>{t}</h1>";
+
+		$this->assertSame( '<h1>Widget</h1>', $this->render( $source, [ 'product' => [ 'title' => 'Widget' ] ] ) );
+
+		$source2 = "---\nconst first = items[0];\nconst byName = map['name'];\n---\n{first}|{byName}";
+
+		$this->assertSame( 'A|B', $this->render( $source2, [ 'items' => [ 'A', 'B' ], 'map' => [ 'name' => 'B' ] ] ) );
+	}
+
+	public function testNowReturnsCurrentTimestamp(): void {
+		$before = time();
+		$out    = $this->render( '<span>{now()}</span>' );
+
+		preg_match( '/<span>(\d+)<\/span>/', $out, $m );
+		$this->assertArrayHasKey( 1, $m );
+
+		$ts = (int) $m[1];
+		$this->assertGreaterThanOrEqual( $before, $ts );
+		$this->assertLessThanOrEqual( $before + 5, $ts );
+	}
+
+	public function testNowInFrontmatterComputedFlag(): void {
+		$source = "---\nconst isLive = now() >= start && now() <= end;\nconst year = now() | date('%Y');\n---\n{isLive}|{year}";
+
+		$result = $this->render( $source, [ 'start' => time() - 10, 'end' => time() + 10 ] );
+		[ $live, $year ] = explode( '|', $result );
+
+		// `true` renders as "true"; `false` as empty.
+		$this->assertSame( 'true', $live );
+		$this->assertSame( (string) date( 'Y' ), $year );
+	}
+
 	public function testCollectionPredicateMethodsOnData(): void {
 		$this->assertSame(
 			'<p>yes</p>',

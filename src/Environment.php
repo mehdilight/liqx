@@ -51,6 +51,7 @@ final class Environment {
 
 		$environment->registerGlobal( 'render', $environment->makeRenderGlobal() );
 		$environment->registerGlobal( 'section', $environment->makeSectionGlobal() );
+		$environment->registerGlobal( 'now', static fn (): int => time() );
 
 		return $environment;
 	}

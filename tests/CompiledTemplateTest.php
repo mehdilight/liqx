@@ -327,6 +327,24 @@ final class CompiledTemplateTest extends TestCase {
 		$this->assertParity( $source, [ 'block' => [ 'title' => 'Hi' ], 'section' => 'x' ] );
 	}
 
+	public function testDynamicComputedAccessInFrontmatterParity(): void {
+		$source = "---\nconst key = 'title';\nconst t = product[key];\nconst first = items[0];\n---\n<h1>{t}</h1><span>{first}</span>";
+
+		$this->assertParity( $source, [ 'product' => [ 'title' => 'Widget' ], 'items' => [ 'A', 'B' ] ] );
+	}
+
+	public function testNowDateFilterParity(): void {
+		// `now()` itself is non-deterministic; pin the comparison to the current
+		// year, which both the interpreter and compiled path must agree on.
+		$source = '<span>{now() | date(\'%Y\')}</span>';
+
+		$interpreter = Template::parse( $source, Environment::create() )->render();
+		$compiled    = $this->render( $source );
+
+		$this->assertSame( $interpreter, $compiled );
+		$this->assertStringContainsString( (string) date( 'Y' ), $compiled );
+	}
+
 	public function testClearCompiledTemplatesRemovesArtifacts(): void {
 		$this->render( '<p>{name}</p>', [ 'name' => 'Ada' ] );
 		$this->assertNotEmpty( glob( $this->cacheDir . '/*.php' ) ?: [] );

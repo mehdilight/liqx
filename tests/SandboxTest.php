@@ -91,6 +91,32 @@ final class SandboxTest extends TestCase {
 		$this->parseFrontmatter( 'const x = value | replace(eval, "");' );
 	}
 
+	public function testRejectsArbitraryMethodCallOnData(): void {
+		$this->expectException( SyntaxException::class );
+		$this->expectExceptionMessage( 'not a callable method' );
+		$this->parseFrontmatter( 'const x = user.deleteAll();' );
+	}
+
+	public function testRejectsArbitraryMethodCallOnDataAnyName(): void {
+		$this->expectException( SyntaxException::class );
+		$this->expectExceptionMessage( 'not a callable method' );
+		$this->parseFrontmatter( 'const x = order.ship() && product.computeTotal();' );
+	}
+
+	public function testRejectsComputedMethodCallOnData(): void {
+		$this->expectException( SyntaxException::class );
+		$this->parseFrontmatter( 'const x = user[method]();' );
+	}
+
+	public function testAllowsSanctionedMethodCalls(): void {
+		$this->parseFrontmatter( "const t = title.toLowerCase();" );
+		$this->parseFrontmatter( "const j = list.join(', ');" );
+		$this->parseFrontmatter( 'const c = list.concat(other);' );
+		$this->parseFrontmatter( "const s = text.replace('a', 'b');" );
+		$this->parseFrontmatter( "const up = title | upcase;" );
+		$this->addToAssertionCount( 5 );
+	}
+
 	public function testErrorCarriesFrontmatterLine(): void {
 		try {
 			$this->parseFrontmatter( "const ok = 1;\nconst x = window.top;" );

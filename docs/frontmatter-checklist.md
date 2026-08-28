@@ -5,7 +5,10 @@ Status key: `[ ]` pending · `[x]` done · `[~]` in progress
 ## 1. Better data access ergonomics
 - [x] Null-safe navigation / missing-property coalescing (a `?.`-style operator or less-noisy `default()`) so frontmatter isn't `block.settings.x ?? 'Default'` on every line.
       → Added `?.` optional property access (`a?.b`, `a?.[i]`, `a?.b.c` short-circuit).
-- [ ] Encourage/validate dynamic (computed) property access on data in frontmatter.
+- [x] Encourage/validate dynamic (computed) property access on data in frontmatter.
+      → Dynamic access `a[key]`, `a[0]`, `a['name']` works in frontmatter (a declared
+      const key, numeric index, or literal string). Covered by tests in
+      `RenderTest` + `CompiledTemplateTest` (parity).
 
 ## 2. Cross-request / shared (compile-time) values
 - [x] Add a static / literal-only destructuring form that resolves once at **compile time** and is baked into the artifact (distinct from per-request derived values).
@@ -32,7 +35,13 @@ Status key: `[ ]` pending · `[x]` done · `[~]` in progress
       `includes`, `indexOf`, `length`); arbitrary JS method calls remain disallowed.
 - [x] Make the nesting-depth error message actionable.
       → The compiler depth-limit error now suggests flattening/breaking into consts.
-- [ ] Ensure arbitrary property method calls on data are clearly policed in frontmatter.
+- [x] Ensure arbitrary property method calls on data are clearly policed in frontmatter.
+      → Parse-time whitelist: only the curated collection/string methods (`map`,
+      `filter`, `find`, `some`, `every`, `join`, `includes`, `concat`, `slice`,
+      `indexOf`, `toUpperCase`, `toLowerCase`, `replace`, `replaceAll`, `trim`,
+      `split`, `startsWith`, `endsWith`) are callable; arbitrary methods
+      (`user.deleteAll()`) and computed calls (`x[fn]()`) are rejected, so
+      frontmatter can never invoke an arbitrary method on host data.
 
 ## 4. Helpers / globals intentionally missing
 - [x] String helpers as filters (`slugify`, `truncate`, `capitalize`, `replace`, `split`)
@@ -40,8 +49,12 @@ Status key: `[ ]` pending · `[x]` done · `[~]` in progress
       → All already existed (`truncate`, `truncatewords`, `capitalize`, `replace`,
       `remove`, `split`, `upcase`, `downcase`, `strip`, `append`, `prepend`) except
       `slugify`, which was added. Verified string filters work in frontmatter.
+- [x] Date/`now()` / datetime-range helpers for computed flags and defaults.
+      → Added a `now()` global returning the current Unix timestamp, usable in
+      frontmatter for computed flags (`const isLive = now() >= start && now() <= end;`)
+      and paired with the existing `date` filter (`now() | date('%Y')`). Covered by
+      interpreter + compiled (parity) tests.
 - [ ] Unified locale/currency-aware `format()` filter (build on existing `money_*`).
-- [ ] Date/`now()` / datetime-range helpers for computed flags and defaults.
 
 ## 5. Frontmatter-specific ergonomics
 - [x] `return` / default-export semantics: a final expression becomes a "template props"

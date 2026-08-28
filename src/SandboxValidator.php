@@ -46,6 +46,19 @@ final class SandboxValidator {
 
 	private const COLLECTION_CALLBACKS = [ 'map', 'filter', 'find', 'some', 'every' ];
 
+	/**
+	 * The only method names callable on a value in frontmatter — the curated
+	 * array/string methods the evaluator implements. Anything else (e.g.
+	 * `user.deleteAll()`) is rejected at parse time so frontmatter can never
+	 * invoke an arbitrary method on data.
+	 */
+	private const CALLABLE_METHODS = [
+		'map', 'filter', 'find', 'some', 'every', 'join', 'includes',
+		'concat', 'slice', 'indexOf',
+		'toUpperCase', 'toLowerCase', 'replace', 'replaceAll', 'trim',
+		'split', 'startsWith', 'endsWith',
+	];
+
 	public function validateDeclaration( Frontmatter|FrontmatterDestructure $declaration ): void {
 		$line = $declaration->line;
 
@@ -105,9 +118,27 @@ final class SandboxValidator {
 		}
 
 		if ( $expr instanceof Call ) {
-			$isCollectionCallback = $expr->callee instanceof Member
-				&& ! $expr->callee->computed
-				&& in_array( $expr->callee->access, self::COLLECTION_CALLBACKS, true );
+			// Only the curated collection/string methods are callable on a value;
+			// arbitrary property method calls on data are refused at parse time.
+			// Computed method calls (`x[fn]()`) can't be statically verified, so
+			// they're refused too.
+			if ( $expr->callee instanceof Member ) {
+				$method = $expr->callee->access;
+
+				if ( $expr->callee->computed || ! is_string( $method ) || ! in_array( $method, self::CALLABLE_METHODS, true ) ) {
+					throw new SyntaxException(
+						sprintf(
+							'%s is not a callable method in frontmatter; use a defined const or a filter instead',
+							is_string( $method ) ? $method : 'Computed method call'
+						),
+						$line
+					);
+				}
+
+				$isCollectionCallback = in_array( $method, self::COLLECTION_CALLBACKS, true );
+			} else {
+				$isCollectionCallback = false;
+			}
 
 			$this->validateExpr( $expr->callee, $arrowsAllowed, $line );
 
