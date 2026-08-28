@@ -145,4 +145,52 @@ measure("9. Compiled Render Complex", fn() => $cComplex->render($complexData), 1
 echo "--- full request (end-to-end) ---\n";
 measure("10. Interpreter parse+render Loop", fn() => Template::parse($templateLoopSource, $env)->render(['items' => $items]), 1000);
 measure("11. Compiled warm-cache render Loop", fn() => Template::parse($templateLoopSource, $envCompiled)->render(['items' => $items]), 1000);
+
+// ---- Compile-time static-const folding ----
+// The folded template's static consts are baked into the artifact as literals
+// (e.g. `$ctx->set('tax', 1.21)`), so no arithmetic runs per render. The control
+// template does the *same* arithmetic, but its consts depend on live data, so
+// they must be recomputed on every render.
+$data = ['base' => 10];
+$foldedConstsSource = <<<'LIQX'
+---
+const UNIT = 10 + 5;
+const PRICE = UNIT * 12;
+const TAX = PRICE * (1 + 0.2);
+const RATE = TAX / 4;
+const TOTAL = PRICE + TAX + RATE;
+const MARGIN = 100 - (PRICE / 100 * 8);
+const FLAGS = { sale: true, stock: 3 + 1, zone: 'eu', tier: 'b2' };
+---
+<div>{TOTAL}</div><div>{MARGIN}</div><div>{RATE}</div>
+<div data-flags={FLAGS.sale}>{FLAGS.tier}</div>
+LIQX;
+
+$runtimeConstsSource = <<<'LIQX'
+---
+const unit = base + 5;
+const price = unit * 12;
+const tax = price * (1 + 0.2);
+const rate = tax / 4;
+const total = price + tax + rate;
+const margin = 100 - (price / 100 * 8);
+const flags = { sale: true, stock: 3 + 1, zone: 'eu', tier: 'b2' };
+---
+<div>{total}</div><div>{margin}</div><div>{rate}</div>
+<div data-flags={flags.sale}>{flags.tier}</div>
+LIQX;
+
+$tFolded = Template::parse($foldedConstsSource, $envCompiled);
+$tRuntime = Template::parse($runtimeConstsSource, $envCompiled);
+for ($i = 0; $i < 50; $i++) { $tFolded->render($data); $tRuntime->render($data); }
+
+$it = 20000;
+echo "--- compile-time const folding ---\n";
+measure("12. Compiled render: folded static consts", fn() => $tFolded->render($data), $it);
+measure("13. Compiled render: runtime consts", fn() => $tRuntime->render($data), $it);
+
+$foldedMs = 0; $runtimeMs = 0;
+$s = hrtime(true); for ($i = 0; $i < $it; $i++) { $tFolded->render($data); } $foldedMs = (hrtime(true) - $s) / 1_000_000;
+$s = hrtime(true); for ($i = 0; $i < $it; $i++) { $tRuntime->render($data); } $runtimeMs = (hrtime(true) - $s) / 1_000_000;
+printf("folding speedup vs runtime consts: %.2fx (folded %.2f ms, runtime %.2f ms)\n", $runtimeMs / $foldedMs, $foldedMs, $runtimeMs);
 echo "====================================\n";

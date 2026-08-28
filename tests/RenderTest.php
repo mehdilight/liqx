@@ -99,6 +99,46 @@ final class RenderTest extends TestCase {
 		$this->render( $source, [] );
 	}
 
+	public function testRootRefersToWholePayload(): void {
+		$this->assertSame(
+			'<h1>Hi</h1>',
+			$this->render( '<h1>{root.block.title}</h1>', [ 'block' => [ 'title' => 'Hi' ] ] )
+		);
+	}
+
+	public function testRootInFrontmatter(): void {
+		$source = "---\nconst t = root.block.title | default('n/a');\n---\n<h1>{t}</h1>";
+
+		$this->assertSame( '<h1>Hi</h1>', $this->render( $source, [ 'block' => [ 'title' => 'Hi' ] ] ) );
+		$this->assertSame( '<h1>n/a</h1>', $this->render( $source, [] ) );
+	}
+
+	public function testRootBypassesNestedScope(): void {
+		$template = Template::parse( '<p>{block.title}</p><p>{root.block.title}</p>', $this->env );
+
+		$parent = new \Phpmystic\Liqx\Context( $this->env, false, [ 'block' => [ 'title' => 'Root' ] ] );
+		$nested = \Phpmystic\Liqx\Context::inherit( $this->env, false, $parent, [ 'block' => [ 'title' => 'Shadowed' ] ] );
+
+		// Inside the nested scope `block` is shadowed to "Shadowed", but
+		// `root.block` still reads the whole payload.
+		$this->assertSame( '<p>Shadowed</p><p>Root</p>', $template->renderContext( $nested ) );
+	}
+
+	public function testRootWorksInStrictMode(): void {
+		$this->assertSame(
+			'<h1>Hi</h1>',
+			$this->render( '<h1>{root.block.title}</h1>', [ 'block' => [ 'title' => 'Hi' ] ], strict: true )
+		);
+	}
+
+	public function testRootCannotBeDeclared(): void {
+		$source = "---\nconst root = { a: 1 };\n---\n<p>x</p>";
+
+		$this->expectException( \Phpmystic\Liqx\SyntaxException::class );
+
+		$this->render( $source, [] );
+	}
+
 	public function testCollectionPredicateMethodsOnData(): void {
 		$this->assertSame(
 			'<p>yes</p>',

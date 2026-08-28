@@ -49,19 +49,29 @@ final class SandboxValidator {
 	public function validateDeclaration( Frontmatter|FrontmatterDestructure $declaration ): void {
 		$line = $declaration->line;
 
-		if ( $declaration instanceof FrontmatterDestructure ) {
-			$this->validateExpr( $declaration->init, arrowsAllowed: false, line: $line );
+		if ( $declaration instanceof Frontmatter ) {
+			$this->rejectReservedName( $declaration->name, $line );
 
-			foreach ( $declaration->bindings as $binding ) {
-				if ( null !== $binding['default'] ) {
-					$this->validateExpr( $binding['default'], arrowsAllowed: false, line: $line );
-				}
-			}
+			$this->validateExpr( $declaration->expr, arrowsAllowed: false, line: $line );
 
 			return;
 		}
 
-		$this->validateExpr( $declaration->expr, arrowsAllowed: false, line: $line );
+		foreach ( $declaration->bindings as $binding ) {
+			$this->rejectReservedName( $binding['name'], $line );
+
+			if ( null !== $binding['default'] ) {
+				$this->validateExpr( $binding['default'], arrowsAllowed: false, line: $line );
+			}
+		}
+
+		$this->validateExpr( $declaration->init, arrowsAllowed: false, line: $line );
+	}
+
+	private function rejectReservedName( string $name, int $line ): void {
+		if ( 'root' === $name ) {
+			throw new SyntaxException( '`root` is reserved and cannot be declared in frontmatter', $line );
+		}
 	}
 
 	/**

@@ -25,6 +25,12 @@ final class Context {
 
 	/** @return array{found:bool, value:mixed} */
 	public function lookup( string $name ): array {
+		// `root` always refers to the whole render payload — the outermost
+		// scope — regardless of nesting, so it can't be shadowed.
+		if ( 'root' === $name ) {
+			return [ 'found' => true, 'value' => $this->scopes[0] ];
+		}
+
 		$count = count( $this->scopes );
 
 		if ( 1 === $count ) {
@@ -45,6 +51,10 @@ final class Context {
 	}
 
 	public function get( string $name ): mixed {
+		if ( 'root' === $name ) {
+			return $this->scopes[0];
+		}
+
 		$count = count( $this->scopes );
 
 		if ( 1 === $count ) {
@@ -61,6 +71,11 @@ final class Context {
 	}
 
 	public function set( string $name, mixed $value ): void {
+		// `root` is reserved — it always means the whole payload.
+		if ( 'root' === $name ) {
+			throw new \InvalidArgumentException( '`root` is reserved and cannot be reassigned' );
+		}
+
 		$this->scopes[ count( $this->scopes ) - 1 ][ $name ] = $value;
 	}
 

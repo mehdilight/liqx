@@ -321,6 +321,12 @@ final class CompiledTemplateTest extends TestCase {
 		$this->assertParity( $source, [] );
 	}
 
+	public function testRootReferenceParity(): void {
+		$source = '<h1>{root.block.title}</h1><span>{root.section}</span>';
+
+		$this->assertParity( $source, [ 'block' => [ 'title' => 'Hi' ], 'section' => 'x' ] );
+	}
+
 	public function testClearCompiledTemplatesRemovesArtifacts(): void {
 		$this->render( '<p>{name}</p>', [ 'name' => 'Ada' ] );
 		$this->assertNotEmpty( glob( $this->cacheDir . '/*.php' ) ?: [] );

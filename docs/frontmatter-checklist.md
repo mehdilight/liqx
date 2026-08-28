@@ -15,7 +15,12 @@ Status key: `[ ]` pending · `[x]` done · `[~]` in progress
       dependencies and parity-risky ops (loose `==`, `< >`, `&&/||/??`, truthiness `?:`)
       stay runtime.
 - [x] Document compile-time constants vs. per-request derived values.
-- [ ] Verify compile-time constants deliver a real perf win (artifact reuse).
+- [x] Verify compile-time constants deliver a real perf win (artifact reuse).
+      → `bench.php` "compile-time const folding" section: a folding-heavy template
+      renders at **~2.38x** (386k vs 167k ops/s) vs. a value-identical template whose
+      consts depend on live data and must be recomputed each render. The folded
+      artifact bakes constants in as literals (e.g. `$ctx->set('tax', 1.21)`) so no
+      per-render arithmetic runs.
 
 ## 3. Sandbox completeness (tighten before widening)
 - [x] Decide deliberate surface for collection methods beyond `.map/.filter/.find`
@@ -51,8 +56,12 @@ Status key: `[ ]` pending · `[x]` done · `[~]` in progress
 - [ ] `join`/`concat` string helper to avoid `+` overload surprises.
 
 ## 7. `this` / root-data reference
-- [ ] Decide a way to reference the whole render payload (e.g. `root.block`) to replace
+- [x] Decide a way to reference the whole render payload (e.g. `root.block`) to replace
       long dotted paths like `block.settings.` repeated everywhere.
+      → Reserved `root` identifier resolves to the whole payload (the outermost scope),
+      even inside nested section/partial scopes; works in body + frontmatter, interpreter +
+      compiled, strict + lenient. Cannot be shadowed or re-declared (parse-time error).
+      `this` was deliberately skipped (lexical-`this` binding complexity in arrow fns).
 
 ## Reference notes
 - Frontmatter = sandboxed, restricted JS: `const`/`let` only (+ a final `return <expr>;`);
