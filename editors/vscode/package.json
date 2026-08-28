@@ -1,8 +1,8 @@
 {
   "name": "liqx",
   "displayName": "Liqx",
-  "description": "Syntax highlighting, snippets, and basic completion for the Liqx template language (.liqx).",
-  "version": "0.1.0",
+  "description": "Syntax highlighting, hover docs, snippets, and completion for the Liqx template language (.liqx).",
+  "version": "0.2.0",
   "publisher": "phpmystic",
   "license": "MIT",
   "engines": {

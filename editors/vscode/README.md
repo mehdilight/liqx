@@ -12,9 +12,12 @@ Syntax highlighting, snippets, and basic completion for `.liqx` templates.
     each still highlighting `{ }` interpolation
   - `{ }` expression attributes inside HTML tags (`src={url}`, `{...attrs}`)
   - HTML via the built-in `text.html.basic`
+- **Hover docs** — signature + description (+ example) when you hover a filter,
+  an array/string method, a keyword (`const`/`let`/`return`), or
+  `render` / `section` / `now` / `root` / `props`.
 - **Snippets** — `---`, `map`, `if`, `ternary`, `pipe`, `render`, `section`,
   `style`, `schema`, `schemaprops`, `arrowblock`, …
-- **Completion**:
+- **Completion** (each item carries the same hover doc):
   - filter names after `|`
   - array / string methods after `.`
   - `const` / `let` / `return`, and `render` / `section` / `now` / `root` / `props`
@@ -37,7 +40,7 @@ Or run it live: open `editors/vscode/` in VS Code and press <kbd>F5</kbd>
 npm i -g @vscode/vsce
 cd editors/vscode
 vsce package
-code --install-extension liqx-0.1.0.vsix
+code --install-extension liqx-0.2.0.vsix
 ```
 
 ## Notes
