@@ -47,6 +47,27 @@ final class Compiler {
 	public const VERSION = 2;
 
 	/**
+	 * Guard against pathological deeply-nested templates exhausting the PHP
+	 * stack during compilation. Reached only by adversarial or machine-generated
+	 * input; valid merchant templates sit far below it.
+	 */
+	private const MAX_NESTING = 2000;
+
+	/**
+	 * A fingerprint of this emitter's generated code — the content hash of the
+	 * compiler source itself plus the human-bumped {@see self::VERSION}. Cache
+	 * artifact keys are derived from it, so editing the emitter automatically
+	 * invalidates stale compiled templates without relying on anyone remembering
+	 * to bump `VERSION`.
+	 */
+	public static function fingerprint(): string {
+		$source = @file_get_contents( __DIR__ . '/Compiler.php' );
+		$hash   = false !== $source ? sha1( $source ) : (string) @filemtime( __DIR__ . '/Compiler.php' );
+
+		return self::VERSION . ':' . $hash;
+	}
+
+	/**
 	 * HTML void elements that must not have closing tags — mirrors the
 	 * Renderer so compiled markup matches interpreted markup.
 	 *
@@ -102,6 +123,9 @@ final class Compiler {
 	 * generated source, so captured names collide with nothing.
 	 */
 	private int $varCounter = 0;
+
+	/** Current expression-nesting depth, guarded by {@see self::MAX_NESTING}. */
+	private int $exprDepth = 0;
 
 	private function freshVar(): string {
 		return '__v' . ( $this->varCounter++ );
@@ -405,6 +429,18 @@ final class Compiler {
 	 * where the interpreter suppresses undefined-variable errors.
 	 */
 	private function expr( Expr $expression, bool $lenient = false ): string {
+		if ( ++$this->exprDepth > self::MAX_NESTING ) {
+			throw new LiqxException( 'Template nesting exceeds the compiler depth limit (' . self::MAX_NESTING . ')' );
+		}
+
+		try {
+			return $this->exprInner( $expression, $lenient );
+		} finally {
+			--$this->exprDepth;
+		}
+	}
+
+	private function exprInner( Expr $expression, bool $lenient = false ): string {
 		if ( $expression instanceof Literal ) {
 			return '(' . var_export( $expression->value, true ) . ')';
 		}

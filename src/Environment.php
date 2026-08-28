@@ -172,7 +172,7 @@ final class Environment {
 		}
 
 		$source  = $fileSystem->load( $name );
-		$fileKey = md5( 'partial:' . Compiler::VERSION . ':' . $name . ':' . md5( $source ) );
+		$fileKey = md5( 'partial:' . Compiler::fingerprint() . ':' . $name . ':' . md5( $source ) );
 
 		return CompiledTemplate::cached(
 			$dir,

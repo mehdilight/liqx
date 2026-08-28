@@ -35,18 +35,20 @@ via `render`/`section` globals) use compiled closures.
 
 ## Cache invalidation
 
-Artifact filenames are content-addressed:
+Artifact filenames are content-addressed on the compiler fingerprint:
 
 ```
-md5('template:' . Compiler::VERSION . ':' . $name . ':' . md5($source)) . '.php'
-md5('partial:'  . Compiler::VERSION . ':' . $name . ':' . md5($source)) . '.php'
+md5('template:' . Compiler::fingerprint() . ':' . $name . ':' . md5($source)) . '.php'
+md5('partial:'  . Compiler::fingerprint() . ':' . $name . ':' . md5($source)) . '.php'
 ```
 
 - Editing the `.liqx` source changes `md5($source)` → new filename → the next
   render parses, recompiles, and writes a fresh artifact. No manual clearing.
-- Bumping `Compiler::VERSION` (in `src/Compiler.php`) recompiles every template
-  even when its source is unchanged — bump it whenever the emitter changes, or
-  unchanged templates keep serving stale bytecode.
+- `Compiler::fingerprint()` is a content hash of `src/Compiler.php` itself plus
+  the human-bumped `Compiler::VERSION`. Because the artifact key depends on it,
+  **editing the emitter automatically invalidates every cached template** — no
+  need to remember to bump `VERSION`. `VERSION` remains for explicit wholesale
+  recompiles.
 - The template name is part of the key too: rendering the same source under a
   different name produces a separate artifact.
 
@@ -56,10 +58,12 @@ directory) to purge them.
 
 ## Request lifecycle (compiled mode)
 
-- `Template::parse` in compiled mode **defers parsing**. On a cache hit the
-  source is never parsed again — the artifact is loaded straight from OPcache.
-- On a cache miss it parses (so syntax errors still throw, named, at render
-  time), compiles, and writes the artifact.
+- `Template::parse` in compiled mode **fails fast**: it first checks for a
+  cached artifact. On a **hit**, the source is never parsed again — the
+  artifact is loaded straight from OPcache. On a **miss**, it parses eagerly so
+  a syntax error surfaces at `parse()` time (carrying the template name), and
+  the parsed tree feeds the compiler. The expensive codegen still runs only on
+  the first render after a miss.
 
 ## API
 

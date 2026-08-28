@@ -25,16 +25,41 @@ final class Template {
 		$environment ??= Environment::default();
 
 		if ( null !== $environment->compiledTemplateDir() ) {
-			// Cached path: defer the parse. A cache hit skips parsing entirely
-			// (the artifact is only readable after validation succeeded once);
-			// on a miss the parse runs at render/compile time and still throws
-			// with the template name.
-			return new self( $environment, $source, $name );
+			$template = new self( $environment, $source, $name );
+
+			// Fail fast: a cache hit (a valid artifact on disk) proves the source
+			// compiled and validated once, so parsing can be skipped entirely. On
+			// a miss we parse now, so a syntax error surfaces at `parse()` time
+			// — not on first render — and the parsed tree feeds the compiler.
+			if ( ! $template->hasCachedArtifact() ) {
+				$template->document();
+			}
+
+			return $template;
 		}
 
 		$document = self::parseDocument( $source, $name );
 
 		return new self( $environment, $source, $name, $document );
+	}
+
+	/**
+	 * Whether a compiled artifact already exists for this template. The artifact
+	 * path matches {@see self::compiled()}, so a positive answer means rendering
+	 * will hit the cache and never touch the parser.
+	 */
+	private function hasCachedArtifact(): bool {
+		$dir = $this->environment->compiledTemplateDir();
+
+		if ( null === $dir ) {
+			return false;
+		}
+
+		return is_file( $dir . '/' . $this->artifactKey() . '.php' );
+	}
+
+	private function artifactKey(): string {
+		return md5( 'template:' . Compiler::fingerprint() . ':' . $this->name . ':' . md5( $this->source ) );
 	}
 
 	private static function parseDocument( string $source, string $name ): Document {
@@ -119,7 +144,7 @@ final class Template {
 			);
 		}
 
-		$fileKey = md5( 'template:' . Compiler::VERSION . ':' . $this->name . ':' . md5( $this->source ) );
+		$fileKey = $this->artifactKey();
 
 		return $this->compiled = CompiledTemplate::cached(
 			$dir,

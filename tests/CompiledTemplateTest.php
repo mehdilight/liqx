@@ -103,6 +103,39 @@ final class CompiledTemplateTest extends TestCase {
 		}
 	}
 
+	public function testNestedArrowsCaptureEnclosingClosureVariables(): void {
+		// `filter` (and `i`) are bound by the outer map; the inner map references
+		// them across the closure boundary. The compiled closure must capture
+		// them in its `use (...)`, or they resolve to undefined/null at runtime.
+		$data = [ 'groups' => [
+			[ 'label' => 'A', 'items' => [ [ 'name' => 'a1' ], [ 'name' => 'a2' ] ] ],
+			[ 'label' => 'B', 'items' => [ [ 'name' => 'b1' ] ] ],
+		] ];
+
+		$source = '{groups.map((group, gi) => <section data-i={gi}>{group.items.map(item => <span>{item.name}-{group.label}-{gi}</span>)}</section>)}';
+
+		$this->assertParity( $source, $data );
+
+		// Triple nesting: inmost arrow captures from two enclosing scopes.
+		$deep = '{groups.map(g => <div>{g.items.map(i => <p>{i.name.length > 0 ? g.items.map(j => j.name) : ""}</p>)}</div>)}';
+		$this->assertParity( $deep, $data );
+
+		// A block-body inner arrow whose locals and constants reference an
+		// enclosing arrow's parameter (capture into a block-body declaration).
+		$blockBody = '{groups.map(g => <ul>{g.items.map(x => { const tag = g.label + "-" + x.name; return <li>{tag}</li>; })}</ul>)}';
+		$this->assertParity( $blockBody, $data );
+
+		// Shadowing: the inner arrow rebinds the same name — must NOT capture the
+		// outer one (it is its own param), while a distinct outer var is captured.
+		$shadow = '{groups.map(g => <div>{g.items.map(g => <i>{g.name}</i>)}</div>)}';
+		$this->assertParity( $shadow, $data );
+
+		// Capture from two distinct enclosing scopes at once plus the outer var
+		// used as a filter argument inside the inmost arrow.
+		$filters = '{groups.map((g, idx) => <p>{g.items.map(x => `${x.name}-${g.label}-${idx}`)}</p>)}';
+		$this->assertParity( $filters, $data );
+	}
+
 	public function testStrictModeThrowsWithTemplateName(): void {
 		$template = Template::parse( '<p>{missing}</p>', $this->env, 'templates/index' );
 
@@ -192,13 +225,52 @@ final class CompiledTemplateTest extends TestCase {
 		$source = '<p>{name}</p>';
 		$this->render( $source, [ 'name' => 'Ada' ] );
 
-		$expected = md5( 'template:' . Compiler::VERSION . ':' . '' . ':' . md5( $source ) );
+		// The key is content-addressed on the compiler fingerprint + source, and
+		// still carries the explicit VERSION for human-bumped upgrades.
+		$expected = md5( 'template:' . Compiler::fingerprint() . ':' . '' . ':' . md5( $source ) );
 		$this->assertFileExists( $this->cacheDir . '/' . $expected . '.php' );
 
-		// An artifact written by an older emitter (VERSION - 1) must not be
-		// served — the key change forces a recompile.
-		$stale = md5( 'template:' . ( Compiler::VERSION - 1 ) . ':' . '' . ':' . md5( $source ) );
+		// An artifact written by an older emitter must not be served — the key
+		// change forces a recompile.
+		$stale = md5( 'template:stale:' . '' . ':' . md5( $source ) );
 		$this->assertFileDoesNotExist( $this->cacheDir . '/' . $stale . '.php' );
+	}
+
+	public function testCacheKeyIncludesCompilerFingerprintSoEmitterChangesRecompile(): void {
+		$source = '<p>{name}</p>';
+		$this->render( $source, [ 'name' => 'Ada' ] );
+
+		$fingerprint = Compiler::fingerprint();
+		$this->assertNotSame( '', $fingerprint, 'fingerprint must not be empty' );
+		$this->assertSame( $fingerprint, Compiler::fingerprint(), 'fingerprint must be stable within a run' );
+
+		$expected = md5( 'template:' . $fingerprint . ':' . '' . ':' . md5( $source ) );
+		$this->assertFileExists( $this->cacheDir . '/' . $expected . '.php' );
+
+		// An artifact written under an older emitter fingerprint must not be served.
+		$stale = md5( 'template:stale-fingerprint:' . '' . ':' . md5( $source ) );
+		$this->assertFileDoesNotExist( $this->cacheDir . '/' . $stale . '.php' );
+	}
+
+	public function testCompiledModeFailsFastAtParseTime(): void {
+		// In compiled mode a syntax error must surface the moment the template is
+		// parsed — not be deferred to first render.
+		try {
+			Template::parse( '<p>{unclosed', $this->env, 'sections/broken' );
+			$this->fail( 'Expected a LiqxException at parse() time' );
+		} catch ( \Phpmystic\Liqx\LiqxException $e ) {
+			$this->assertSame( 'sections/broken', $e->templateName );
+		}
+	}
+
+	public function testCompiledModeGuardsAgainstPathologicalNesting(): void {
+		// Adversarial / machine-generated input far deeper than the compiler
+		// cap must fail fast with a clear error instead of exhausting the stack.
+		$source = '{' . str_repeat( '!', 5000 ) . 'true}';
+
+		$this->expectException( \Phpmystic\Liqx\LiqxException::class );
+
+		$this->render( $source, [] );
 	}
 
 	public function testClearCompiledTemplatesRemovesArtifacts(): void {
