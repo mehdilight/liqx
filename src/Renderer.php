@@ -54,6 +54,28 @@ final class Renderer {
 
 		$ctx->push();
 
+		$this->evaluateFrontmatter( $document, $ctx );
+
+		foreach ( $document->body as $node ) {
+			$out .= $this->renderNode( $node, $ctx );
+		}
+
+		$ctx->pop();
+
+		return $out;
+	}
+
+	/**
+	 * Evaluate the document's frontmatter declarations (and a final `return` as
+	 * `props`) into the context's current scope. Returns the evaluated
+	 * const-name → value map — also the dev/inspection surface for hosts that
+	 * want a debug endpoint showing what a template derived from its data.
+	 *
+	 * @return array<string, mixed>
+	 */
+	public function evaluateFrontmatter( Document $document, Context $ctx ): array {
+		$values = [];
+
 		foreach ( $document->frontmatter as $declaration ) {
 			try {
 				if ( $declaration instanceof FrontmatterDestructure ) {
@@ -64,20 +86,22 @@ final class Renderer {
 
 						if ( $found ) {
 							$ctx->set( $binding['name'], $resolved );
+							$values[ $binding['name'] ] = $resolved;
 
 							continue;
 						}
 
-						$ctx->set(
-							$binding['name'],
-							null !== $binding['default'] ? $this->evaluator->evaluate( $binding['default'], $ctx ) : null
-						);
+						$computed           = null !== $binding['default'] ? $this->evaluator->evaluate( $binding['default'], $ctx ) : null;
+						$ctx->set( $binding['name'], $computed );
+						$values[ $binding['name'] ] = $computed;
 					}
 
 					continue;
 				}
 
-				$ctx->set( $declaration->name, $this->evaluator->evaluate( $declaration->expr, $ctx ) );
+				$computed                      = $this->evaluator->evaluate( $declaration->expr, $ctx );
+				$ctx->set( $declaration->name, $computed );
+				$values[ $declaration->name ] = $computed;
 			} catch ( LiqxException $e ) {
 				$this->stampLine( $e, $declaration->line );
 
@@ -87,16 +111,12 @@ final class Renderer {
 
 		// A final `return { … };` becomes the body's `props`.
 		if ( null !== $document->frontmatterReturn ) {
-			$ctx->set( 'props', $this->evaluator->evaluate( $document->frontmatterReturn, $ctx ) );
+			$props                      = $this->evaluator->evaluate( $document->frontmatterReturn, $ctx );
+			$values['props']            = $props;
+			$ctx->set( 'props', $props );
 		}
 
-		foreach ( $document->body as $node ) {
-			$out .= $this->renderNode( $node, $ctx );
-		}
-
-		$ctx->pop();
-
-		return $out;
+		return $values;
 	}
 
 	public function renderNode( Node $node, Context $ctx ): string {

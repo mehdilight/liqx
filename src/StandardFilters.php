@@ -32,6 +32,7 @@ final class StandardFilters {
 			'find_index'      => [ self::class, 'findIndex' ],
 			'first'           => [ self::class, 'first' ],
 			'floor'           => [ self::class, 'floor' ],
+			'format'          => [ self::class, 'format' ],
 			'group_by'        => [ self::class, 'groupBy' ],
 			'has'             => [ self::class, 'has' ],
 			'join'            => [ self::class, 'join' ],
@@ -122,9 +123,19 @@ final class StandardFilters {
 		return (string) $prefix . (string) $value;
 	}
 
-	/** @return array<mixed> */
-	public static function concat( mixed $value, mixed $other ): array {
-		return array_merge( is_array( $value ) ? $value : [], is_array( $other ) ? $other : [] );
+	/**
+	 * Concatenate. Arrays merge element-wise; anything else concatenates as
+	 * strings — an explicit, type-predictable alternative to the `+` operator,
+	 * which switches between numeric addition and string joining by value type.
+	 *
+	 * @return array<mixed>|string
+	 */
+	public static function concat( mixed $value, mixed $other ): array|string {
+		if ( is_array( $value ) && is_array( $other ) ) {
+			return array_merge( $value, $other );
+		}
+
+		return (string) $value . (string) $other;
 	}
 
 	// ---------------------------------------------------------------------
@@ -358,6 +369,61 @@ final class StandardFilters {
 
 	public static function money( mixed $value, mixed $currency = 'MAD' ): string {
 		return sprintf( '%.2f %s', ( (int) $value ) / 100, $currency );
+	}
+
+	/**
+	 * Unified, locale-aware value formatter. `kind` selects the mode; the rest
+	 * of the arguments are `locale` (+ currency symbol for `currency`). Built on
+	 * the PHP `intl` extension with a `number_format` fallback, so the same call
+	 * renders money/numbers/percents/dates consistently across locales.
+	 *
+	 *   value | format('currency', 'USD')          → $1,234.56
+	 *   value | format('currency', 'EUR', 'de_DE')
+	 *   value | format('number', 'fr_FR')
+	 *   value | format('percent')
+	 *   value | format('date', '%Y-%m-%d')         → same input rules as `date`
+	 */
+	public static function format( mixed $value, mixed $kind = 'number', mixed $arg = '', mixed $locale = '' ): string {
+		$mode   = (string) $kind;
+		$arg    = (string) $arg;
+		$locale = (string) $locale;
+
+		if ( 'date' === $mode ) {
+			return self::date( $value, $arg );
+		}
+
+		if ( 'currency' === $mode ) {
+			$symbol = '' !== $arg ? $arg : 'USD';
+			$locale = '' !== $locale ? $locale : 'en_US';
+			$amount = (float) $value;
+
+			if ( class_exists( \NumberFormatter::class ) ) {
+				$fmt = new \NumberFormatter( $locale, \NumberFormatter::CURRENCY );
+				$out = $fmt->formatCurrency( $amount, $symbol );
+
+				return false === $out ? number_format( $amount, 2 ) . ' ' . $symbol : $out;
+			}
+
+			return number_format( $amount, 2 ) . ' ' . $symbol;
+		}
+
+		if ( '' === $locale ) {
+			$locale = '' !== $arg ? $arg : 'en_US';
+		}
+
+		$amount = (float) $value;
+
+		if ( ! class_exists( \NumberFormatter::class ) ) {
+			return 'percent' === $mode ? number_format( $amount * 100, 0 ) . '%' : number_format( $amount, 2 );
+		}
+
+		$fmt = 'percent' === $mode
+			? new \NumberFormatter( $locale, \NumberFormatter::PERCENT )
+			: new \NumberFormatter( $locale, \NumberFormatter::DECIMAL );
+
+		$out = $fmt->format( $amount );
+
+		return false === $out ? number_format( $amount, 2 ) : $out;
 	}
 
 	public static function date( mixed $value, mixed $format = '' ): string {

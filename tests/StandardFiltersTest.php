@@ -41,6 +41,40 @@ final class StandardFiltersTest extends TestCase {
 		$this->assertSame( 'cdab', $this->pipe( 'x | prepend("cd")', [ 'x' => 'ab' ] ) );
 	}
 
+	public function testConcatIsPredictableStringOrArrayMerge(): void {
+		$this->assertSame( 'ab', $this->pipe( 'x | concat("b")', [ 'x' => 'a' ] ) );
+		$this->assertSame( '3 items', $this->pipe( 'x | concat(" items")', [ 'x' => 3 ] ) );
+		$this->assertSame( '1, 2', $this->pipe( 'x | concat(y) | join(", ")', [ 'x' => [ 1 ], 'y' => [ 2 ] ] ) );
+	}
+
+	public function testConcatStringHelperInFrontmatter(): void {
+		$source = "---\nconst label = count | concat(' items');\n---\n<p>{label}</p>";
+
+		$this->assertSame( '<p>3 items</p>', $this->render( $source, [ 'count' => 3 ] ) );
+	}
+
+	public function testPlusOnStringsConcatenates(): void {
+		$this->assertSame( 'ab', $this->pipe( 'x + "b"', [ 'x' => 'a' ] ) );
+	}
+
+	public function testFormatCurrencyLocaleAware(): void {
+		$this->assertSame( '$1,234.56', $this->pipe( 'x | format("currency", "USD")', [ 'x' => 1234.56 ] ) );
+		$this->assertSame( '$1,234.56', $this->pipe( 'x | format("currency", "USD")', [ 'x' => '1234.56' ] ) );
+	}
+
+	public function testFormatNumberLocale(): void {
+		$this->assertSame( '1,234.56', $this->pipe( 'x | format("number")', [ 'x' => 1234.56 ] ) );
+		$this->assertSame( '1.234,56', $this->pipe( 'x | format("number", "de_DE")', [ 'x' => 1234.56 ] ) );
+	}
+
+	public function testFormatPercent(): void {
+		$this->assertSame( '50%', $this->pipe( 'x | format("percent")', [ 'x' => 0.5 ] ) );
+	}
+
+	public function testFormatDate(): void {
+		$this->assertSame( (string) date( 'Y' ), $this->pipe( 'x | format("date", "%Y")', [ 'x' => time() ] ) );
+	}
+
 	public function testArithmeticFilters(): void {
 		$this->assertSame( '5', $this->pipe( 'x | abs', [ 'x' => -5 ] ) );
 		$this->assertSame( '14', $this->pipe( 'x | plus(4)', [ 'x' => 10 ] ) );

@@ -110,12 +110,18 @@ final class Template {
 	 * scope (e.g. block children) on the context before rendering.
 	 */
 	public function renderContext( Context $context ): string {
+		$document = $this->document();
+
+		if ( null !== $document->schema ) {
+			$this->validateFrontmatterTypes( $document, $context );
+		}
+
 		if ( null !== $this->environment->compiledTemplateDir() ) {
 			return $this->compiled()->renderContext( $context );
 		}
 
 		try {
-			return ( new Renderer() )->render( $this->document(), $context );
+			return ( new Renderer() )->render( $document, $context );
 		} catch ( LiqxException $e ) {
 			if ( null === $e->templateName && '' !== $this->name ) {
 				$e->templateName = $this->name;
@@ -123,6 +129,33 @@ final class Template {
 
 			throw $e;
 		}
+	}
+
+	/**
+	 * Evaluate the template's frontmatter and return the const-name → value map.
+	 * When the template declares a `<schema>`, the resulting `props` are type-
+	 * checked against it, throwing a typed early failure on a mismatch.
+	 *
+	 * @param array<string, mixed> $data
+	 * @return array<string, mixed>
+	 */
+	public function frontmatter( array $data = [], bool $strict = false ): array {
+		$document = $this->document();
+		$context  = new Context( $this->environment, $strict, $data );
+
+		$values = ( new Renderer() )->evaluateFrontmatter( $document, $context );
+
+		if ( null !== $document->schema ) {
+			( new SchemaValidator() )->validate( $document, $values );
+		}
+
+		return $values;
+	}
+
+	private function validateFrontmatterTypes( Document $document, Context $context ): void {
+		$values = ( new Renderer() )->evaluateFrontmatter( $document, $context );
+
+		( new SchemaValidator() )->validate( $document, $values );
 	}
 
 	/**

@@ -4,6 +4,7 @@ declare( strict_types=1 );
 namespace Phpmystic\Liqx\Tests;
 
 use Phpmystic\Liqx\Environment;
+use Phpmystic\Liqx\LiqxException;
 use Phpmystic\Liqx\Template;
 use PHPUnit\Framework\TestCase;
 
@@ -159,6 +160,59 @@ final class RenderTest extends TestCase {
 		$ts = (int) $m[1];
 		$this->assertGreaterThanOrEqual( $before, $ts );
 		$this->assertLessThanOrEqual( $before + 5, $ts );
+	}
+
+	public function testFrontmatterInspectionReturnsConstValues(): void {
+		$source = "---\nconst title = block.title | default('Hello');\nconst count = 3;\nconst { size = 'M' } = product;\n---\n<p>body</p>";
+
+		$values = Template::parse( $source, $this->env )->frontmatter( [ 'block' => [ 'title' => 'Hi' ], 'product' => [] ] );
+
+		$this->assertSame( 'Hi', $values['title'] );
+		$this->assertSame( 3, $values['count'] );
+		$this->assertSame( 'M', $values['size'] );
+	}
+
+	public function testFrontmatterInspectionIncludesProps(): void {
+		$source = "---\nconst title = 'T';\nreturn { title: title };\n---\n<p>body</p>";
+
+		$values = Template::parse( $source, $this->env )->frontmatter();
+
+		$this->assertSame( 'T', $values['title'] );
+		$this->assertSame( [ 'title' => 'T' ], $values['props'] );
+	}
+
+	public function testSchemaValidatesPropsTypeEarly(): void {
+		$source = "---\nconst n = 7;\nreturn { count: n };\n---\n<p>{props.count}</p><schema>\n{ \"props\": { \"count\": \"string\" } }\n</schema>";
+
+		$this->expectException( LiqxException::class );
+		$this->expectExceptionMessage( 'Schema type mismatch' );
+
+		Template::parse( $source, $this->env )->render( [] );
+	}
+
+	public function testSchemaAcceptsMatchingProps(): void {
+		$source = "---\nconst n = '7';\nreturn { count: n };\n---\n<p>{props.count}</p><schema>\n{ \"props\": { \"count\": \"string\" } }\n</schema>";
+
+		$out = Template::parse( $source, $this->env )->render( [] );
+
+		$this->assertSame( '<p>7</p>', $out );
+	}
+
+	public function testSchemaUnionTypeAllowed(): void {
+		$source = "---\nreturn { tag: null };\n---\n<p>x</p><schema>\n{ \"props\": { \"tag\": [\"string\", \"null\"] } }\n</schema>";
+
+		$out = Template::parse( $source, $this->env )->render( [] );
+
+		$this->assertSame( '<p>x</p>', $out );
+	}
+
+	public function testFrontmatterInspectionValidatesSchema(): void {
+		$source = "---\nreturn { count: 'abc' };\n---\n<p>x</p><schema>\n{ \"props\": { \"count\": \"int\" } }\n</schema>";
+
+		$this->expectException( LiqxException::class );
+		$this->expectExceptionMessage( 'Schema type mismatch' );
+
+		Template::parse( $source, $this->env )->frontmatter();
 	}
 
 	public function testNowInFrontmatterComputedFlag(): void {

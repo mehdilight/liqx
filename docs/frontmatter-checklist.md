@@ -54,7 +54,10 @@ Status key: `[ ]` pending · `[x]` done · `[~]` in progress
       frontmatter for computed flags (`const isLive = now() >= start && now() <= end;`)
       and paired with the existing `date` filter (`now() | date('%Y')`). Covered by
       interpreter + compiled (parity) tests.
-- [ ] Unified locale/currency-aware `format()` filter (build on existing `money_*`).
+- [x] Unified locale/currency-aware `format()` filter (build on existing `money_*`).
+      → `x | format('currency', 'USD', 'en_US')` (Intl `NumberFormatter`), plus
+      `'number'`, `'percent'`, `'date'` modes — all locale-aware, with a
+      `number_format` fallback when the `intl` extension is absent.
 
 ## 5. Frontmatter-specific ergonomics
 - [x] `return` / default-export semantics: a final expression becomes a "template props"
@@ -62,11 +65,23 @@ Status key: `[ ]` pending · `[x]` done · `[~]` in progress
       → A trailing `return { … };` exposes the value as `props` to the body (interpreter +
       compiled). Must be the last frontmatter statement; JSX/arbitrary arrows are rejected
       by the sandbox on the returned expression.
-- [ ] Let frontmatter reference/validate the `Schema` node's types for early, typed failures.
+- [x] Let frontmatter reference/validate the `Schema` node's types for early, typed failures.
+      → `SchemaValidator` type-checks the evaluated `props` against the `<schema>`
+      block (`{ "props": { "count": "int", "tag": ["string","null"] } }`), throwing a
+      typed `LiqxException` early during `render()`/`frontmatter()` instead of letting
+      bad shapes mis-render silently. Basic scalar/array/object/union tokens.
 
 ## 6. Transparency / debuggability
-- [ ] Dev-only inspection of evaluated frontmatter consts (e.g. a `--`/comment node or debug endpoint).
-- [ ] `join`/`concat` string helper to avoid `+` overload surprises.
+- [x] Dev-only inspection of evaluated frontmatter consts (e.g. a `--`/comment node or debug endpoint).
+      → New `Template::frontmatter($data, $strict)` returns the evaluated const-name →
+      value map (plus `props` when there's a return) without rendering the body — a
+      debug endpoint for hosts. Implemented via `Renderer::evaluateFrontmatter()`, the
+      single source of truth shared with the render path.
+- [x] `join`/`concat` string helper to avoid `+` overload surprises.
+      → `concat` filter is now type-predictable: arrays merge, anything else
+      concatenates as strings (`count | concat(' items')` → `'3 items'`), as an explicit
+      alternative to the `+` operator (which switches between addition/concatenation by
+      value type).
 
 ## 7. `this` / root-data reference
 - [x] Decide a way to reference the whole render payload (e.g. `root.block`) to replace
