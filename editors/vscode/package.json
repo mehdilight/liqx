@@ -1,0 +1,64 @@
+{
+  "name": "liqx",
+  "displayName": "Liqx",
+  "description": "Syntax highlighting, snippets, and basic completion for the Liqx template language (.liqx).",
+  "version": "0.1.0",
+  "publisher": "phpmystic",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
+  "keywords": [
+    "liqx",
+    "liquid",
+    "jsx",
+    "template",
+    "php"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mehdilight/liqx.git",
+    "directory": "editors/vscode"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:liqx"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "liqx",
+        "aliases": [
+          "Liqx",
+          "liqx"
+        ],
+        "extensions": [
+          ".liqx"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "liqx",
+        "scopeName": "text.html.liqx",
+        "path": "./syntaxes/liqx.tmLanguage.json",
+        "embeddedLanguages": {
+          "meta.embedded.block.js": "javascript",
+          "meta.embedded.block.css": "css",
+          "meta.embedded.block.json": "json"
+        }
+      }
+    ],
+    "snippets": [
+      {
+        "language": "liqx",
+        "path": "./snippets/liqx.code-snippets"
+      }
+    ]
+  }
+}

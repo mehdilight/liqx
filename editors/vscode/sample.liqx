@@ -1,0 +1,48 @@
+---
+const { settings, blocks } = section;
+const featured = products.filter(p => p.tags.includes('featured'));
+const heading  = settings.heading | truncate(40) | upcase;
+const isLive   = now() >= settings.start && now() <= settings.end;
+return { heading: heading, count: featured.length };
+---
+<section class="hero">
+  <h2>{heading}</h2>
+
+  {/* only render when there is something to show */}
+  {featured.length === 0 && <p>No featured products.</p>}
+
+  <ul>
+    {featured.map((product, i) => (
+      <li class={i % 2 === 0 ? 'row-even' : 'row-odd'} key={product.id}>
+        <img src={product.image | img_url('300x')} alt={product.title} />
+        <span>{product.price | money('USD')}</span>
+      </li>
+    ))}
+  </ul>
+
+  {blocks.map(block => (
+    block.type === 'text'
+      ? <p {...block.attrs}>{block.settings.text}</p>
+      : block.type === 'button'
+        ? <a href={block.settings.url}>{block.settings.label}</a>
+        : null
+  ))}
+</section>
+
+<style>
+  .hero--{section.id} {
+    background: {settings.bg_color};
+    padding: 10px;
+  }
+</style>
+
+<script src={asset_url} defer>
+  window.__hero = { live: {isLive ? 'true' : 'false'} };
+</script>
+
+<schema>
+{
+  "name": "Hero",
+  "props": { "heading": "string", "count": "int" }
+}
+</schema>

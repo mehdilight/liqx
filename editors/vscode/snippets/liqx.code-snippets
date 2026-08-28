@@ -1,0 +1,99 @@
+{
+  "Frontmatter block": {
+    "prefix": "---",
+    "body": ["---", "const ${1:name} = ${2:expr};", "---", "$0"],
+    "description": "Liqx frontmatter fence"
+  },
+  "Frontmatter destructure": {
+    "prefix": "fmdestructure",
+    "body": ["const { ${1:a}, ${2:b} = ${3:default} } = ${4:props};"],
+    "description": "const { a, b = default } = props;"
+  },
+  "Return props": {
+    "prefix": "return",
+    "body": ["return { $0 };"],
+    "description": "Expose frontmatter props to the body"
+  },
+  "Interpolate": {
+    "prefix": "{",
+    "body": ["{$1}$0"],
+    "description": "{ expression }"
+  },
+  "Map list": {
+    "prefix": "map",
+    "body": ["{${1:items}.map(${2:item} => (", "\t$0", "))}"],
+    "description": "Render a list with .map()"
+  },
+  "Map with index": {
+    "prefix": "mapi",
+    "body": ["{${1:items}.map((${2:item}, ${3:i}) => (", "\t$0", "))}"],
+    "description": ".map((item, i) => ...)"
+  },
+  "Filter callback": {
+    "prefix": "filter",
+    "body": ["${1:items}.filter(${2:item} => ${3:item.active})"],
+    "description": ".filter(item => ...)"
+  },
+  "Conditional (&&)": {
+    "prefix": "if",
+    "body": ["{${1:cond} && $0}"],
+    "description": "Render when truthy"
+  },
+  "Ternary": {
+    "prefix": "ternary",
+    "body": ["{${1:cond} ? ${2:whenTrue} : ${3:whenFalse}}"],
+    "description": "{ cond ? a : b }"
+  },
+  "Pipe filter": {
+    "prefix": "pipe",
+    "body": ["{${1:value} | ${2:filter}}"],
+    "description": "{ value | filter }"
+  },
+  "Default filter": {
+    "prefix": "default",
+    "body": ["{${1:value} | default(${2:fallback})}"],
+    "description": "{ value | default(fallback) }"
+  },
+  "render snippet": {
+    "prefix": "render",
+    "body": ["{render(\"${1:name}\", { $2 })}$0"],
+    "description": "Render a named snippet with props"
+  },
+  "section": {
+    "prefix": "section",
+    "body": ["{section(\"${1:name}\")}$0"],
+    "description": "Render a named section"
+  },
+  "style block": {
+    "prefix": "style",
+    "body": ["<style>", "\t$0", "</style>"],
+    "description": "Scoped <style> block"
+  },
+  "script block": {
+    "prefix": "script",
+    "body": ["<script>", "\t$0", "</script>"],
+    "description": "Verbatim <script> block"
+  },
+  "schema block": {
+    "prefix": "schema",
+    "body": ["<schema>", "{", "\t\"name\": \"${1:Name}\"$0", "}", "</schema>"],
+    "description": "Section <schema> metadata"
+  },
+  "schema with props": {
+    "prefix": "schemaprops",
+    "body": [
+      "<schema>",
+      "{",
+      "\t\"name\": \"${1:Name}\",",
+      "\t\"props\": { \"${2:key}\": \"${3:string}\" }",
+      "}",
+      "</schema>"
+    ],
+    "description": "Schema with typed props"
+  },
+  "Block-body arrow": {
+    "prefix": "arrowblock",
+    "body": ["${1:item} => {", "\tconst ${2:x} = $3;", "\treturn $0;", "}"],
+    "description": "Arrow with local consts and a return"
+  }
+}
