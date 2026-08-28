@@ -88,10 +88,12 @@ final class Compiler {
 
 	/**
 	 * Local variables (no `$` prefix) the innermost closure references from
-	 * enclosing closures — becomes its `use (...)` list. Transiently reset by
+	 * enclosing closures — becomes its `use (...)` list. Maps each variable to
+	 * the scope index where it is bound, so a capture only propagates up to
+	 * closures that are themselves outside that binding. Transiently reset by
 	 * {@see arrow()}.
 	 *
-	 * @var array<string, bool>
+	 * @var array<string, int>
 	 */
 	private array $captures = [];
 
@@ -103,6 +105,17 @@ final class Compiler {
 
 	private function freshVar(): string {
 		return '__v' . ( $this->varCounter++ );
+	}
+
+	/**
+	 * The inner closure's accumulated captures. Returning through a method keeps
+	 * PHPStan widening the set to its declared `array<string,int>` shape instead
+	 * of narrowing it to empty during flow analysis inside {@see arrow()}.
+	 *
+	 * @return array<string, int>
+	 */
+	private function pendingCaptures(): array {
+		return $this->captures;
 	}
 
 	/**
@@ -403,7 +416,7 @@ final class Compiler {
 				[ $var, $index ] = $resolved;
 
 				if ( $index < $this->closureStart ) {
-					$this->captures[ $var ] = true;
+					$this->captures[ $var ] = $index;
 				}
 
 				return '( $' . $var . ' )';
@@ -630,18 +643,30 @@ final class Compiler {
 			$bodyLines[] = '        return ' . $this->expr( $expression->body, $lenient ) . ';';
 		}
 
+		// First build this arrow's own `use (...)` from the captures its body
+		// discovered. Then propagate each capture up to the enclosing closure —
+		// but only when the variable lives beyond that closure's own scope
+		// (index < savedClosureStart); a variable the enclosing closure binds
+		// itself (its own param or local) is already in scope there.
+		$bodyCaptures = $this->pendingCaptures();
+
+		$use     = 'use ( $ctx, $eval';
+		foreach ( array_keys( $bodyCaptures ) as $useVar ) {
+			$use .= ', $' . $useVar;
+		}
+		$use .= ' )';
+
+		foreach ( $bodyCaptures as $useVar => $index ) {
+			if ( $index < $savedClosureStart ) {
+				$savedCaptures[ $useVar ] = $index;
+			}
+		}
+
 		array_pop( $this->scopeStack );
 		$this->closureStart = $savedClosureStart;
 		$this->captures     = $savedCaptures;
 
 		$lines   = [];
-		$use     = 'use ( $ctx, $eval';
-
-		foreach ( array_keys( $this->captures ) as $useVar ) {
-			$use .= ', $' . $useVar;
-		}
-
-		$use     .= ' )';
 		$lines[] = 'static function ( mixed ...$__args ) ' . $use . ' {';
 		$lines[] = implode( "\n", $paramLines );
 
