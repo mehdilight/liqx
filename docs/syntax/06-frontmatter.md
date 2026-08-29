@@ -18,10 +18,12 @@ return { heading: heading, featured: featured };
 ## Declarations
 
 ```liqx
+---
 const x = 5;
 let y = x * 2;
 const name = `Hi ${user.name}`;
 const t = product?.title ?? 'Untitled';
+---
 ```
 
 * `const` and `let` only. One initializer each; `;` optional.
@@ -31,8 +33,10 @@ const t = product?.title ?? 'Untitled';
 ### Destructuring
 
 ```liqx
+---
 const { product, size = 'medium' } = props;
 const { settings, blocks } = section;
+---
 ```
 
 Object destructuring with defaults. Keys pulled from arrays, objects, or
@@ -70,8 +74,10 @@ const t = root.block.title | default('n/a');
 Global returning the current Unix timestamp. Pair with `date`:
 
 ```liqx
+---
 const year = now() | date('%Y');
 const live = now() >= start && now() <= end;
+---
 ```
 
 ## Sandbox rules
@@ -96,7 +102,9 @@ map  filter  find  some  every  join  includes  concat  slice  indexOf
 toUpperCase  toLowerCase  replace  replaceAll  trim  split  startsWith  endsWith
 ```
 
-Anything else → use a `const` or a filter instead.
+Anything else → `<name> is not a callable method in frontmatter; use a defined
+const or a filter instead`. (`sort`, `reverse`, `reduce`, `at`, `flat`,
+`padStart` and friends are all rejected — reach for the equivalent filter.)
 
 ## Compile-time constants
 
@@ -106,9 +114,16 @@ consts) are folded once at compile time and inlined. Consts that touch data,
 globals, filters, or parity-risky ops (`==`, `< >`, `&& || ??`, `?:`) stay
 per-request.
 
+Every const also binds to a native PHP local in the generated code, so body
+references skip the scope-stack walk. The name stays published to the render
+scope as well, which is what keeps `<schema>` prop validation and nested
+`section()` renders working. Both are internal optimizations with no effect on
+what a template may write or what it renders.
+
 ## Errors & inspection
 
 * Errors carry the frontmatter source line (and template name).
 * In compiled mode, invalid frontmatter fails fast at `parse()`.
-* `Template::frontmatter($data)` returns the evaluated `const → value` map
-  (plus `props`) without rendering the body — a debug endpoint.
+* `Template::frontmatter($data, $strict = false)` returns the evaluated
+  `const → value` map (plus `props`) without rendering the body — a debug
+  endpoint.

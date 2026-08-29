@@ -30,6 +30,14 @@ There are **no** `{% if %}` / `{% for %}` tags. Use JS expressions.
 Falsy: `null`, `false`, `0`, `0.0`, `''`, `'0'`.
 **Everything else is truthy — including `[]` (empty array) and `'false'`.**
 
+Beware `{count && …}` when `count` can be `0`: `&&` yields the *left* operand,
+so a falsy `0` renders as `0` rather than as nothing. Use an explicit
+comparison when the value is numeric:
+
+```liqx
+{count > 0 && <span>{count} left</span>}
+```
+
 Guard on emptiness with `.length` or the `size` filter:
 
 ```liqx
@@ -60,6 +68,9 @@ Callback signature: `(element, index, wholeArray) => ...`
 * `.map` on `null`/undefined yields an empty list (no error), so
   `{maybe.items.map(...)}` is safe.
 * Also works on host collections implementing `Traversable`.
+* In the compiled path a `.map` used directly in output position is fused into
+  a single projecting-and-concatenating pass. Purely an optimization — the
+  output is identical.
 
 See [collection-methods.md](./07-collection-methods.md) for `.filter`,
 `.find`, `.some`, `.every`, and block-body arrows.

@@ -32,7 +32,8 @@ expression (`{show && <span>hi</span>}`).
 |------------------|--------|
 | `true` | bare attribute: ` name` |
 | `false` / `null` | attribute omitted |
-| array | space-joined (`class={['a', maybe && 'b']}`) |
+| array | space-joined — falsy entries become empty strings, not dropped, so `class={['a', false]}` yields `class="a "` |
+| `''` | `name=""` (kept, unlike `false`) |
 | anything else | `name="<stringified>"` |
 
 ### `key`

@@ -66,6 +66,7 @@ Their bodies are captured **raw** — CSS / JS / JSON, never parsed as JSX.
 
 * Pure JSON metadata. **Never rendered.**
 * `Template::schema()` returns the decoded array (host section config).
+  Multiple `<schema>` blocks: the last one wins.
 * If a `"props"` map is present, the frontmatter `return` value (`props`) is
   **type-checked** on every render — a mismatch throws a typed
   `LiqxException` early instead of mis-rendering.

@@ -24,7 +24,12 @@ render body: HTML + JSX + { expressions }
 | 6 | [frontmatter.md](./06-frontmatter.md) | `const`/`let`, destructuring, `return`/`props`, sandbox rules, `root`, `now()` |
 | 7 | [collection-methods.md](./07-collection-methods.md) | `.map/.filter/.find/.some/.every`, array/string methods, block-body arrows |
 | 8 | [verbatim-blocks.md](./08-verbatim-blocks.md) | `<style>`, `<script>`, `<schema>` and interpolation rules |
-| 9 | [composition.md](./09-composition.md) | `render()`, `section()`, props, scoping, strict mode |
+| 9 | [composition.md](./09-composition.md) | `render()`, `section()`, props, scoping, strict mode, output wrapper |
+
+Rendering is also available in a compiled mode that emits a native PHP closure
+per template. It is a drop-in switch with identical output — see
+[compilation.md](../compilation.md) for how to enable it and what the host must
+configure.
 
 ## Full example
 

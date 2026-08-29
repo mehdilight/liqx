@@ -9,11 +9,11 @@ frontmatter.
 | Method | Notes |
 |--------|-------|
 | `.map(fn)` | `fn(element, index, array)` |
-| `.filter(fn)` | keep where `fn(...)` is truthy |
+| `.filter(fn)` | keep where `fn(element, index, array)` is truthy |
 | `.find(fn)` | first match, or `null` |
 | `.some(fn)` | any match → bool (empty → `false`) |
 | `.every(fn)` | all match → bool (empty → `true`) |
-| `.join(sep='')` | → string |
+| `.join(sep='')` | → string (the `join` **filter** defaults to a space instead) |
 | `.includes(x)` | strict membership → bool |
 | `.indexOf(x)` | index or `-1` |
 | `.concat(arr)` | merge arrays |
@@ -27,10 +27,14 @@ frontmatter.
 {items.some(i => i.inStock) ? 'available' : 'out'}
 ```
 
-* On `null`/undefined: `.map/.filter/.find` → `[]`, `.some` → `false`,
-  `.every` → `true`, others → `null`. So chains on maybe-missing data are safe.
+* On `null`/undefined: `.map/.filter` → `[]`, `.every` → `true`, everything
+  else (`.find`, `.some`, `.join`, `.includes`, `.indexOf`, `.concat`,
+  `.slice`, `.length`) → `null`. All render as empty, so chains on
+  maybe-missing data are safe.
 * Works on host objects implementing `Traversable` / `Countable`
   (`.length` on a `Countable` avoids hydrating items).
+* These are array methods. On a string receiver only the string methods below
+  are available — `'ab'.map(…)` is an `Unknown string method map` error.
 
 ## String methods
 

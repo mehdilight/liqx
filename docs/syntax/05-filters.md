@@ -14,7 +14,11 @@ Value-first pipeline, like Liquid. `a | f(b)` calls `f(a, b)`.
 * Filter names accept both `snake_case` and `camelCase`
   (`divided_by` == `dividedBy`).
 * Usable in frontmatter too: `const h = settings.heading | truncate(40);`
-* Unknown filter → error (names the template + line).
+* Unknown filter → `Unknown filter <name>` (names the template + line). In a
+  chain the **leftmost** unknown filter is the one reported, matching
+  evaluation order.
+* `|` is the loosest operator, so `{a ? b : c | f}` filters the whole ternary
+  result. Parenthesize when you mean otherwise.
 
 ## Standard filters
 
@@ -53,7 +57,7 @@ are registered by the host via `Environment::registerFilter`.
 |--------|-------|
 | `escape` | HTML-escape (`ENT_QUOTES`, UTF-8) |
 | `escape_once` | escape without double-escaping entities |
-| `url_encode` / `url_decode` | `urlencode` / `urldecode` |
+| `url_encode` / `url_decode` | PHP `urlencode` / `urldecode` — note a space becomes `+`, not `%20` |
 
 ### Numbers
 
@@ -83,7 +87,7 @@ are registered by the host via `Environment::registerFilter`.
 
 | Filter | Notes |
 |--------|-------|
-| `date(fmt)` | `strftime`-style `%Y %m %d %H:%M …`; input: timestamp, `'now'`, or any `strtotime` string |
+| `date(fmt)` | `strftime`-style `%Y %m %d %H:%M …` tokens, mapped onto PHP `date()`; input: numeric timestamp, `'now'`, or any `strtotime` string. No format → value unchanged; unparseable input → returned as-is |
 
 ```liqx
 {now() | date('%Y')}
@@ -109,6 +113,9 @@ are registered by the host via `Environment::registerFilter`.
 | `uniq(key?)` | dedupe |
 | `compact(key?)` | drop `null` entries |
 | `group_by(key)` | → `[{ name, items }, …]` |
-| `join(sep=' ')` | join array to string |
+| `join(sep=' ')` | join array to string — note the default is a **space**, unlike the `.join()` *method*, which defaults to `''` |
 | `reverse` | reverse array |
 | `sum` `size` `first` `last` | as above |
+
+All 76 registered names (both casings) are also introspectable at runtime via
+`Environment::capabilities()['filters']`.

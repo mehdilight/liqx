@@ -14,11 +14,24 @@ const heading = section.settings.heading | upcase;
 
 ## Frontmatter
 
-* Optional. Starts **only** if the very first non-blank line is exactly `---`.
+* Optional. Starts **only** if the very first line of the document is `---`
+  (surrounding spaces on that line are fine).
 * Ends at the next line whose trimmed content is exactly `---`.
 * Contents = restricted JS declarations (`const` / `let`) plus an optional
   final `return <expr>;`. See [frontmatter.md](./06-frontmatter.md).
-* Leading blank lines before the opening `---` are allowed.
+
+> **Nothing may precede the fence** — not a blank line, not a comment. The
+> fence is only recognised at offset 0, so anything before it silently turns
+> the whole frontmatter into body text (you get literal `---` and `const …` in
+> your HTML, and every name it declared renders empty). This fails quietly
+> rather than raising an error, so it is worth knowing.
+>
+> ```liqx
+> {/* ✗ this comment disables the frontmatter below */}
+> ---
+> const x = 5;
+> ---
+> ```
 
 ```liqx
 ---

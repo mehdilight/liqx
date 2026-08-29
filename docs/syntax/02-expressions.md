@@ -23,7 +23,8 @@ JS-style expression.
 | Template string | `` `Hi ${name}, ${count} items` `` |
 
 Object keys may be identifiers, strings, or reserved words (`{ class: 'x' }`).
-No shorthand (`{ x }`) and no computed keys (`{ [k]: v }`).
+No shorthand (`{ x }` → syntax error) and no computed keys (`{ [k]: v }` →
+syntax error).
 
 ## Operators
 
@@ -74,8 +75,9 @@ Parenthesize to be explicit: `{(a || b) && c}`.
 ```
 
 Property resolution order on objects: `beforeMethod()` (Drops) → public
-property → `ArrayAccess` → `get_object_vars`. Missing → `null` (lenient) or
-throws (strict mode, non-null-safe only).
+property → `ArrayAccess` → `get_object_vars`. A missing property is always
+`null` — including in strict mode. Only an **undefined variable** throws; see
+[composition.md](./09-composition.md#strict-vs-lenient-rendering).
 
 ## Template strings
 
@@ -101,7 +103,7 @@ When an expression value is rendered to markup:
 |-------|--------|
 | `null`, `false` | `` (empty) |
 | `true` | `true` |
-| array | each item rendered and concatenated |
+| array | each item rendered and concatenated (recursively) |
 | object with `__toString` | the string |
-| object without `__toString` | `` (empty) |
+| object without `__toString` | `` (empty) — including a bare `Traversable`; call `.map(…)` to render its items |
 | JSX element | its rendered HTML |
