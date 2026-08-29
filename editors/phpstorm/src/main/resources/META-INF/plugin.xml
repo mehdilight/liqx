@@ -46,5 +46,8 @@
 
         <typedHandler
                 implementation="com.phpmystic.liqx.editor.LiqxTypedHandler"/>
+
+        <backspaceHandlerDelegate
+                implementation="com.phpmystic.liqx.editor.LiqxBackspaceHandler"/>
     </extensions>
 </idea-plugin>

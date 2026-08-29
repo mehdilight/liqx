@@ -17,10 +17,21 @@ public final class LiqxTypedHandler extends TypedHandlerDelegate {
             return Result.CONTINUE;
         }
 
-        if (c == '}' || c == ']' || c == ')' || c == '"' || c == '\'') {
-            int offset = editor.getCaretModel().getOffset();
-            Document document = editor.getDocument();
-            CharSequence chars = document.getCharsSequence();
+        int offset = editor.getCaretModel().getOffset();
+        Document document = editor.getDocument();
+        CharSequence chars = document.getCharsSequence();
+
+        if (c == '}') {
+            // Overtype ` }` or `}`
+            if (offset + 1 < chars.length() && chars.charAt(offset) == ' ' && chars.charAt(offset + 1) == '}') {
+                editor.getCaretModel().moveToOffset(offset + 2);
+                return Result.STOP;
+            }
+            if (offset < chars.length() && chars.charAt(offset) == '}') {
+                editor.getCaretModel().moveToOffset(offset + 1);
+                return Result.STOP;
+            }
+        } else if (c == ']' || c == ')' || c == '"' || c == '\'') {
             if (offset < chars.length() && chars.charAt(offset) == c) {
                 editor.getCaretModel().moveToOffset(offset + 1);
                 return Result.STOP;
@@ -42,8 +53,10 @@ public final class LiqxTypedHandler extends TypedHandlerDelegate {
         CharSequence chars = document.getCharsSequence();
 
         if (c == '{') {
+            // User just typed `{`. Insert `  }` and move caret between the two spaces: `{ | }`
             if (offset <= chars.length()) {
-                document.insertString(offset, "}");
+                document.insertString(offset, "  }");
+                editor.getCaretModel().moveToOffset(offset + 1);
                 return Result.STOP;
             }
         } else if (c == '[') {
