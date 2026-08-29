@@ -211,22 +211,9 @@ final class Compiler {
 		}
 
 		if ( ! $hasTemplateBlock ) {
-			$lines[] = '        if ( null !== $wrapper && ! empty( $wrapper[\'tag\'] ) && \'none\' !== $wrapper[\'tag\'] ) {';
-			$lines[] = '            $__wTag = $wrapper[\'tag\'];';
-			$lines[] = '            $out .= \'<\' . $__wTag . $eval->formatWrapperAttrs( $wrapper[\'attrs\'] ?? null ) . \'>\';';
-
-			foreach ( $this->nodeStatements( $document->body, '            ' ) as $statement ) {
+			foreach ( $this->wrappedStatements( $document->body, '        ' ) as $statement ) {
 				$lines[] = $statement;
 			}
-
-			$lines[] = '            $out .= \'</\' . $__wTag . \'>\';';
-			$lines[] = '        } else {';
-
-			foreach ( $this->nodeStatements( $document->body, '            ' ) as $statement ) {
-				$lines[] = $statement;
-			}
-
-			$lines[] = '        }';
 		} else {
 			foreach ( $this->nodeStatements( $document->body, '        ' ) as $statement ) {
 				$lines[] = $statement;
@@ -459,6 +446,42 @@ final class Compiler {
 	// ---------------------------------------------------------------------
 
 	/**
+	 * The body wrapped in the optional host wrapper tag.
+	 *
+	 * The wrapper only contributes an opening and a closing tag, and whether it
+	 * applies is known before any output exists — so the tag is emitted
+	 * conditionally around a body that appears exactly once. Emitting the body
+	 * inside both branches would double the artifact (and with it OPcache
+	 * memory and first-request compile time).
+	 *
+	 * @param list<\Phpmystic\Liqx\Node> $nodes
+	 * @return list<string>
+	 */
+	private function wrappedStatements( array $nodes, string $indent ): array {
+		$statements = [];
+
+		// A fresh local per wrapper: a nested `<template>` emits its own wrapper
+		// block, and sharing one name would let the inner assignment clobber the
+		// outer tag before its closing tag is written.
+		$tag = '$' . $this->freshVar();
+
+		$statements[] = $indent . $tag . ' = ( null !== $wrapper && ! empty( $wrapper[\'tag\'] ) && \'none\' !== $wrapper[\'tag\'] ) ? $wrapper[\'tag\'] : null;';
+		$statements[] = $indent . 'if ( null !== ' . $tag . ' ) {';
+		$statements[] = $indent . '    $out .= \'<\' . ' . $tag . ' . $eval->formatWrapperAttrs( $wrapper[\'attrs\'] ?? null ) . \'>\';';
+		$statements[] = $indent . '}';
+
+		foreach ( $this->nodeStatements( $nodes, $indent ) as $statement ) {
+			$statements[] = $statement;
+		}
+
+		$statements[] = $indent . 'if ( null !== ' . $tag . ' ) {';
+		$statements[] = $indent . '    $out .= \'</\' . ' . $tag . ' . \'>\';';
+		$statements[] = $indent . '}';
+
+		return $statements;
+	}
+
+	/**
 	 * A flat list of `$out .= <expr>;` statements, merging adjacent text.
 	 *
 	 * @param list<\Phpmystic\Liqx\Node> $nodes
@@ -475,22 +498,9 @@ final class Compiler {
 					$text         = '';
 				}
 
-				$statements[] = $indent . 'if ( null !== $wrapper && ! empty( $wrapper[\'tag\'] ) && \'none\' !== $wrapper[\'tag\'] ) {';
-				$statements[] = $indent . '    $__wTag = $wrapper[\'tag\'];';
-				$statements[] = $indent . '    $out .= \'<\' . $__wTag . $eval->formatWrapperAttrs( $wrapper[\'attrs\'] ?? null ) . \'>\';';
-
-				foreach ( $this->nodeStatements( $node->children, $indent . '    ' ) as $stmt ) {
+				foreach ( $this->wrappedStatements( $node->children, $indent ) as $stmt ) {
 					$statements[] = $stmt;
 				}
-
-				$statements[] = $indent . '    $out .= \'</\' . $__wTag . \'>\';';
-				$statements[] = $indent . '} else {';
-
-				foreach ( $this->nodeStatements( $node->children, $indent . '    ' ) as $stmt ) {
-					$statements[] = $stmt;
-				}
-
-				$statements[] = $indent . '}';
 
 				continue;
 			}

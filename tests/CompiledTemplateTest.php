@@ -534,6 +534,57 @@ final class CompiledTemplateTest extends TestCase {
 		$this->assertParity( $source, $data );
 	}
 
+	/**
+	 * The optional wrapper only adds an opening and a closing tag around the
+	 * body, yet the emitter wrote the *entire* body twice — once for the
+	 * wrapped branch and once for the unwrapped one. That doubles artifact
+	 * bytes, OPcache shared memory, and first-request compile time for a branch
+	 * on a value that is known before any output is produced.
+	 */
+	public function testWrapperDoesNotDuplicateTheCompiledBody(): void {
+		$php = $this->compile( '<div class="products">{items.map(i => <span>{i.name}</span>)}</div>' );
+
+		$this->assertSame( 1, substr_count( $php, "'products'" ), 'the body was emitted more than once' );
+		$this->assertSame( 1, substr_count( $php, "'map'" ), 'the body was emitted more than once' );
+
+		// The wrapper tag itself is still conditional.
+		$this->assertStringContainsString( 'formatWrapperAttrs', $php );
+
+		// Same for a <template> block, which carries its own wrapper branch.
+		// (`$ctx->get( 'title' )` is the non-strict half of the identifier pair,
+		// so it appears exactly once per emission of the body.)
+		$tpl = $this->compile( '<template><p>{title}</p></template>' );
+		$this->assertSame( 1, substr_count( $tpl, "\$ctx->get( 'title' )" ), 'the template-block body was emitted more than once' );
+	}
+
+	public function testWrapperParityAcrossEveryWrapperShape(): void {
+		$plain    = '<h2>{title}</h2><p>tail</p>';
+		$withTpl  = '<template><h2>{title}</h2></template>';
+		$data     = [ 'title' => 'T' ];
+		$wrappers = [
+			null,
+			[ 'tag' => 'section' ],
+			[ 'tag' => 'section', 'attrs' => ' class="wrap"' ],
+			[ 'tag' => 'section', 'attrs' => [ 'id' => 'a', 'class' => 'b' ] ],
+			[ 'tag' => 'none' ],
+			[ 'tag' => '' ],
+			[ 'attrs' => [ 'id' => 'no-tag' ] ],
+		];
+
+		foreach ( [ $plain, $withTpl ] as $source ) {
+			foreach ( $wrappers as $wrapper ) {
+				$interpreter = Template::parse( $source, Environment::create() )->render( $data, wrapper: $wrapper );
+				$compiled    = Template::parse( $source, $this->env )->render( $data, wrapper: $wrapper );
+
+				$this->assertSame(
+					$interpreter,
+					$compiled,
+					'wrapper divergence for ' . $source . ' with ' . var_export( $wrapper, true )
+				);
+			}
+		}
+	}
+
 	public function testStaticFrontmatterConstsAreFoldedAtCompileTime(): void {
 		$source = "---\nconst base = 100;\nconst tax = base * 2;\n---\n<p>{tax}</p>";
 
