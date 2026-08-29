@@ -14,6 +14,23 @@ final class Template {
 
 	private ?CompiledTemplate $compiled = null;
 
+	/**
+	 * Memoized {@see requiresSchemaValidation()} for this instance — the answer
+	 * depends only on the source, which an instance never changes.
+	 */
+	private ?bool $requiresSchema = null;
+
+	/**
+	 * Process-wide sidecar answers, keyed by sidecar path. The path embeds a
+	 * content hash of the source, so an entry can never outlive the source it
+	 * describes — an edited template simply reads a different key. This keeps
+	 * the warm render path free of per-render filesystem reads even when each
+	 * request builds a fresh Template.
+	 *
+	 * @var array<string, bool>
+	 */
+	private static array $schemaFlags = [];
+
 	/** Shared, stateless AST walker — reused across renders in the process. */
 	private static ?Renderer $renderer = null;
 
@@ -91,14 +108,30 @@ final class Template {
 	 * (no-schema) case never touches the parser.
 	 */
 	private function requiresSchemaValidation(): bool {
+		if ( null !== $this->requiresSchema ) {
+			return $this->requiresSchema;
+		}
+
 		if ( null !== $this->document ) {
-			return null !== $this->document->schema;
+			return $this->requiresSchema = null !== $this->document->schema;
 		}
 
 		$meta = $this->metaPath();
 
-		if ( null !== $meta && is_file( $meta ) ) {
-			return '1' === @file_get_contents( $meta );
+		if ( null !== $meta ) {
+			// Whether a source declares a `<schema>` is a pure function of that
+			// source, and the sidecar path embeds a hash of it — so one answer
+			// per artifact is valid for the whole process, and an edited source
+			// lands on a different path rather than reusing a stale answer.
+			$known = self::$schemaFlags[ $meta ] ?? null;
+
+			if ( null !== $known ) {
+				return $this->requiresSchema = $known;
+			}
+
+			if ( is_file( $meta ) ) {
+				return $this->requiresSchema = self::$schemaFlags[ $meta ] = '1' === @file_get_contents( $meta );
+			}
 		}
 
 		// No sidecar (a pre-sidecar artifact, or none yet) — parse once to be
@@ -106,14 +139,25 @@ final class Template {
 		$document = $this->document();
 		$this->writeMeta( $document );
 
-		return null !== $document->schema;
+		return $this->requiresSchema = null !== $document->schema;
 	}
 
 	private function writeMeta( Document $document ): void {
 		$meta = $this->metaPath();
 
-		if ( null !== $meta && ! is_file( $meta ) ) {
-			@file_put_contents( $meta, null !== $document->schema ? '1' : '0', LOCK_EX );
+		if ( null === $meta ) {
+			return;
+		}
+
+		$hasSchema = null !== $document->schema;
+
+		// Seed the process-wide answer too: the sidecar exists purely to carry
+		// this flag across requests, so once it is known here, no later render
+		// in this process needs to read it back.
+		self::$schemaFlags[ $meta ] = $hasSchema;
+
+		if ( ! is_file( $meta ) ) {
+			@file_put_contents( $meta, $hasSchema ? '1' : '0', LOCK_EX );
 		}
 	}
 
@@ -135,10 +179,13 @@ final class Template {
 
 	/** A copy with a name — hosts that load by name call this after caching. */
 	public function withName( string $name ): self {
-		$clone              = clone $this;
-		$clone->name        = $name;
-		$clone->artifactKey = null;
-		$clone->compiled    = null;
+		$clone                 = clone $this;
+		$clone->name           = $name;
+		$clone->artifactKey    = null;
+		$clone->compiled       = null;
+		// The sidecar path embeds the name, so the memoized answer belongs to
+		// the old key, not this clone's.
+		$clone->requiresSchema = null;
 
 		return $clone;
 	}

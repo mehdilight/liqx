@@ -384,6 +384,65 @@ final class CompiledTemplateTest extends TestCase {
 		$this->assertSame( $interpreter, $compiled );
 	}
 
+	/**
+	 * The `<schema>` sidecar answers one question — "does this template need
+	 * per-render schema validation?" — whose answer cannot change while the
+	 * artifact key (a content hash of the source) stays the same. Reading it
+	 * from disk on every render costs an uncached open+read syscall per render,
+	 * so the answer must be memoized.
+	 *
+	 * Observable proof: prime the cache, delete the sidecar, then render again.
+	 * A render that still consults disk cannot find the sidecar, falls back to
+	 * parsing the document, and writes the sidecar back — so a sidecar that
+	 * stays absent proves no per-render read happened.
+	 */
+	public function testWarmCacheDoesNotReadSchemaSidecarOnEveryRender(): void {
+		$source = '<p>{name}</p>';
+
+		// Cold: parses, compiles, writes the artifact and the sidecar.
+		$this->assertSame( '<p>Ada</p>', Template::parse( $source, $this->env )->render( [ 'name' => 'Ada' ] ) );
+
+		$sidecars = glob( $this->cacheDir . '/*.meta' ) ?: [];
+		$this->assertCount( 1, $sidecars, 'the cold render should write exactly one sidecar' );
+		$sidecar = $sidecars[0];
+
+		// Warm: the artifact exists, so this instance never parses and must
+		// answer the schema question from the sidecar (once) instead.
+		$warm = Template::parse( $source, $this->env );
+		$this->assertSame( '<p>Bob</p>', $warm->render( [ 'name' => 'Bob' ] ) );
+
+		unlink( $sidecar );
+
+		// Second render on the warm instance: the answer is already known.
+		$this->assertSame( '<p>Cy</p>', $warm->render( [ 'name' => 'Cy' ] ) );
+		$this->assertFileDoesNotExist( $sidecar, 'a repeat render re-read the sidecar instead of memoizing it' );
+
+		// A fresh Template for the same source (a later request in the same
+		// process) must reuse the process-wide answer, not go back to disk.
+		$again = Template::parse( $source, $this->env );
+		$this->assertSame( '<p>Di</p>', $again->render( [ 'name' => 'Di' ] ) );
+		$this->assertFileDoesNotExist( $sidecar, 'a second Template re-read the sidecar instead of memoizing it' );
+	}
+
+	/**
+	 * Memoizing the sidecar answer must not memoize the *validation*: a
+	 * template that declares a `<schema>` still type-checks its props on every
+	 * render, so bad data on a later render fails just as loudly as on the first.
+	 */
+	public function testSchemaValidationStillRunsOnEveryRenderWithWarmCache(): void {
+		$source = "---\nconst n = value;\nreturn { count: n };\n---\n<p>{props.count}</p><schema>\n{ \"props\": { \"count\": \"int\" } }\n</schema>";
+
+		$template = Template::parse( $source, $this->env );
+
+		$this->assertSame( '<p>5</p>', $template->render( [ 'value' => 5 ] ) );
+		$this->assertSame( '<p>7</p>', $template->render( [ 'value' => 7 ] ) );
+
+		// The same warm template, now given data that violates the schema.
+		$this->expectException( \Phpmystic\Liqx\LiqxException::class );
+		$this->expectExceptionMessage( 'Schema type mismatch' );
+		$template->render( [ 'value' => 'abc' ] );
+	}
+
 	public function testTemplateTagParity(): void {
 		$this->assertParity( '<template><p>Hello {name}</p></template>', [ 'name' => 'Ada' ] );
 		$this->assertParity( '<template />' );
