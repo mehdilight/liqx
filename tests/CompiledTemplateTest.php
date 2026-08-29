@@ -6,6 +6,7 @@ namespace Phpmystic\Liqx\Tests;
 use Phpmystic\Liqx\Compiler;
 use Phpmystic\Liqx\CompiledTemplate;
 use Phpmystic\Liqx\Environment;
+use Phpmystic\Liqx\LiqxException;
 use Phpmystic\Liqx\LocalFileSystem;
 use Phpmystic\Liqx\Template;
 use Phpmystic\Liqx\UnknownFilterException;
@@ -843,6 +844,72 @@ final class CompiledTemplateTest extends TestCase {
 
 		// Recompiles on demand afterwards.
 		$this->assertSame( '<p>Ada</p>', $this->render( '<p>{name}</p>', [ 'name' => 'Ada' ] ) );
+	}
+
+	/**
+	 * The schema-sidecar answer is memoized process-wide to keep it off the
+	 * render path. Clearing the cache is the one operation that invalidates
+	 * on-disk state from inside a live process, so it has to drop that memo
+	 * too — otherwise the map is a leak that grows with every distinct source a
+	 * long-lived worker compiles.
+	 */
+	public function testClearCompiledTemplatesAlsoDropsTheMemoizedSchemaFlags(): void {
+		$this->render( '<p>{name}</p>', [ 'name' => 'Ada' ] );
+		$this->render( "---\nreturn { n: 1 };\n---\n<p>{props.n}</p><schema>\n{ \"props\": { \"n\": \"int\" } }\n</schema>" );
+
+		$this->assertNotSame( [], $this->schemaFlags(), 'the sidecar answer was never memoized' );
+
+		$this->env->clearCompiledTemplates();
+
+		$this->assertSame( [], $this->schemaFlags(), 'clearing the cache left stale sidecar answers behind' );
+	}
+
+	/**
+	 * Dropping the memo must not drop the *behaviour* it was memoizing: schema
+	 * validation still has to run on every render after a clear, and a template
+	 * without a schema must still not be validated.
+	 */
+	public function testSchemaValidationSurvivesAClearedCache(): void {
+		$source = "---\nreturn { count: n };\n---\n<p>{props.count}</p><schema>\n{ \"props\": { \"count\": \"int\" } }\n</schema>";
+
+		$this->assertSame( '<p>1</p>', $this->render( $source, [ 'n' => 1 ] ) );
+
+		$this->env->clearCompiledTemplates();
+
+		// Re-warms from scratch, and the sidecar comes back.
+		$this->assertSame( '<p>2</p>', $this->render( $source, [ 'n' => 2 ] ) );
+		$this->assertNotEmpty( glob( $this->cacheDir . '/*.meta' ) ?: [] );
+
+		// And the validation it guards still fires.
+		$this->expectException( LiqxException::class );
+		$this->expectExceptionMessage( 'Schema type mismatch' );
+		$this->render( $source, [ 'n' => 'not-an-int' ] );
+	}
+
+	/**
+	 * The memo is keyed by sidecar path, so it must not grow for repeated
+	 * renders of the same template — only for genuinely distinct sources.
+	 *
+	 * @return array<string, bool>
+	 */
+	private function schemaFlags(): array {
+		$property = new \ReflectionProperty( Template::class, 'schemaFlags' );
+
+		/** @var array<string, bool> $flags */
+		$flags = $property->getValue();
+
+		return $flags;
+	}
+
+	public function testMemoizedSchemaFlagsDoNotGrowPerRender(): void {
+		$this->render( '<p>{name}</p>', [ 'name' => 'a' ] );
+		$before = count( $this->schemaFlags() );
+
+		for ( $i = 0; $i < 20; $i++ ) {
+			$this->render( '<p>{name}</p>', [ 'name' => 'a' ] );
+		}
+
+		$this->assertSame( $before, count( $this->schemaFlags() ), 'the memo grew for repeated renders of one template' );
 	}
 
 	public function testCompiledTemplateFromSource(): void {

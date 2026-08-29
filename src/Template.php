@@ -31,6 +31,21 @@ final class Template {
 	 */
 	private static array $schemaFlags = [];
 
+	/**
+	 * Discard the memoized sidecar answers.
+	 *
+	 * Called by {@see Environment::clearCompiledTemplates()}, which is the one
+	 * operation that invalidates on-disk artifacts from inside a live process:
+	 * the paths those answers were keyed by no longer exist, and a worker that
+	 * clears the cache repeatedly would otherwise accumulate an entry per
+	 * distinct source it ever compiled.
+	 *
+	 * @internal
+	 */
+	public static function forgetSchemaFlags(): void {
+		self::$schemaFlags = [];
+	}
+
 	/** Shared, stateless AST walker — reused across renders in the process. */
 	private static ?Renderer $renderer = null;
 

@@ -136,6 +136,12 @@ final class Environment {
 	public function clearCompiledTemplates(): void {
 		$this->compiledTemplates = [];
 
+		// The memoized `<schema>` sidecar answers are keyed by sidecar path, and
+		// those paths are about to stop existing. Dropping them keeps a
+		// long-lived worker that clears the cache from accumulating an entry per
+		// source it ever compiled.
+		Template::forgetSchemaFlags();
+
 		if ( null === $this->compiledTemplateDir ) {
 			return;
 		}
