@@ -1,0 +1,12 @@
+<idea-plugin>
+    <extensions defaultExtensionNs="com.intellij">
+        <textmate.bundleProvider
+                implementation="com.phpmystic.liqx.textmate.LiqxTextMateBundleProvider"/>
+        <editorHighlighterProvider
+                filetype="Liqx"
+                implementationClass="org.jetbrains.plugins.textmate.language.syntax.highlighting.TextMateEditorHighlighterProvider"/>
+        <lang.syntaxHighlighterFactory
+                language="Liqx"
+                implementationClass="org.jetbrains.plugins.textmate.language.syntax.highlighting.TextMateSyntaxHighlighterFactory"/>
+    </extensions>
+</idea-plugin>
