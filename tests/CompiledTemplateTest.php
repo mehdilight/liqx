@@ -51,6 +51,11 @@ final class CompiledTemplateTest extends TestCase {
 		$this->assertSame( $interpreter, $compiled, 'compiled output diverged from the interpreter for: ' . $source );
 	}
 
+	/** The generated PHP for a source — for asserting on the emitted shape. */
+	private function compile( string $source ): string {
+		return ( new Compiler() )->compile( ( new \Phpmystic\Liqx\Parser() )->parse( $source ) );
+	}
+
 	public function testDataProviderOfRepresentativeTemplates(): void {
 		$data = [
 			'name'     => 'Ada',
@@ -282,6 +287,251 @@ final class CompiledTemplateTest extends TestCase {
 		$this->assertParity( '<p>{missing?.a.b.c}</p>', $data, strict: true );
 		$this->assertParity( '<p>{product?.["title"]}</p>', $data, strict: true );
 		$this->assertParity( '<p>{a?.b ?? "default"}</p>', [ 'a' => [ 'b' => null ] ], strict: true );
+	}
+
+	/**
+	 * A template literal's literal segments are known at compile time, so they
+	 * belong in the generated source as native concatenation. Routing them
+	 * through `Evaluator::templateString()` allocates a parts array and loops it
+	 * on every render for text the compiler already had.
+	 */
+	public function testTemplateStringsCompileToNativeConcatenation(): void {
+		$php = $this->compile( '<p>{`Hi ${name}, you have ${count} items`}</p>' );
+
+		$this->assertStringNotContainsString( 'templateString', $php, 'template literal still dispatches to the templateString helper' );
+
+		// The literal segments survive as PHP string literals.
+		$this->assertStringContainsString( "'Hi '", $php );
+		$this->assertStringContainsString( "', you have '", $php );
+		$this->assertStringContainsString( "' items'", $php );
+
+		// A literal-only template string needs no runtime work at all.
+		$this->assertStringNotContainsString( 'templateString', $this->compile( '<p>{`plain`}</p>' ) );
+	}
+
+	/**
+	 * Template-literal interpolation stringifies through `renderValue`, so the
+	 * inlined form must agree with the interpreter for every value shape —
+	 * including the ones with surprising rules (`false`/null vanish, `true`
+	 * prints, arrays concatenate their items, objects without `__toString`
+	 * vanish).
+	 */
+	public function testInlinedTemplateStringMatchesInterpreterForEveryValueShape(): void {
+		$source = '<p>{`[${v}]`}</p>';
+
+		foreach ( [ null, false, true, 0, 0.0, '', '0', 7, 1.5, 'x', [ 1, 2 ], [ 'a' => 'b' ], [ [ 1 ], [ 2 ] ] ] as $value ) {
+			$this->assertParity( $source, [ 'v' => $value ] );
+		}
+
+		$this->assertParity( $source, [ 'v' => new \stdClass() ] );
+		$this->assertParity( '<p>{`${a}${b}${c}`}</p>', [ 'a' => 'x', 'b' => null, 'c' => 3 ] );
+		$this->assertParity( '<p>{`${n | upcase} ${m}`}</p>', [ 'n' => 'ada', 'm' => 2 ] );
+
+		// Nested interpolation and an interpolation holding an element.
+		$this->assertParity( '<p>{`${`${deep}`}`}</p>', [ 'deep' => 'd' ] );
+		$this->assertParity( '<div>{items.map(i => `${i.a}-${i.b}`)}</div>', [ 'items' => [ [ 'a' => 1, 'b' => 2 ], [ 'a' => 3, 'b' => 4 ] ] ] );
+	}
+
+	/**
+	 * Now that a template literal compiles to concatenation, its result is
+	 * statically known to be a string — so wrapping it in `renderValue()` (which
+	 * exists to stringify unknown values) is dead work, as is routing it through
+	 * `attribute()` (whose job is the `true`/`false`/null attribute rules that a
+	 * string can never trigger).
+	 */
+	public function testKnownStringExpressionsSkipRedundantStringifyWrappers(): void {
+		// Output position: `{`…`}` needs no renderValue.
+		$output = $this->compile( '<p>{`Hi ${name}`}</p>' );
+		$this->assertStringNotContainsString( 'renderValue( ( \'Hi \'', $output, 'a template literal is still re-stringified in output position' );
+
+		// Attribute position: a template literal value needs no attribute().
+		$attr = $this->compile( '<div class={`a-${n}`}></div>' );
+		$this->assertStringNotContainsString( '$eval->attribute( \'class\'', $attr, 'a template-literal attribute still goes through attribute()' );
+		$this->assertStringContainsString( ' class="', $attr, 'the attribute name/quotes were not baked into the artifact' );
+
+		// A string literal attribute is fully static.
+		$this->assertStringNotContainsString( '$eval->attribute(', $this->compile( '<div class="static"></div>' ) );
+
+		// A value of unknown type must keep both helpers — they carry the rules.
+		$dynamic = $this->compile( '<div class={flag}>{value}</div>' );
+		$this->assertStringContainsString( '$eval->attribute(', $dynamic );
+		$this->assertStringContainsString( 'renderValue(', $dynamic );
+	}
+
+	public function testAttributeAndOutputParityForKnownStringValues(): void {
+		// The attribute rules only differ for non-strings, so a string-valued
+		// attribute must render identically — including empty and "0".
+		foreach ( [ '', '0', 'x', 'a b' ] as $value ) {
+			$this->assertParity( '<div class={`${v}`}></div>', [ 'v' => $value ] );
+			$this->assertParity( '<p>{`${v}`}</p>', [ 'v' => $value ] );
+		}
+
+		// A template literal that interpolates a non-string still stringifies it
+		// the same way before the concatenation happens.
+		foreach ( [ null, false, true, 0, [ 1, 2 ] ] as $value ) {
+			$this->assertParity( '<div class={`v-${v}`}></div>', [ 'v' => $value ] );
+		}
+
+		// An element in attribute/output position is also a known string.
+		$this->assertParity( '<div>{show && <span>x</span>}</div>', [ 'show' => true ] );
+		$this->assertParity( '<div title={`t`}><em>{`e`}</em></div>' );
+	}
+
+	/**
+	 * `product.title` has a compile-time-known key, and the overwhelmingly
+	 * common receiver is a plain array. Emitting the array read inline with the
+	 * helper as fallback keeps Drop / ArrayAccess / `length` / object semantics
+	 * intact while skipping a method call per access on the hot path.
+	 */
+	public function testLiteralKeyMemberAccessCompilesToInlineArrayRead(): void {
+		$php = $this->compile( '<p>{product.title}</p>' );
+
+		$this->assertMatchesRegularExpression(
+			'/is_array\(.*\)\s*\?\s*\(.*\[\s*\'title\'\s*\]/s',
+			$php,
+			'literal-key member access did not emit an inline array read'
+		);
+
+		// `length` is not a plain array key (it means count()), and a computed
+		// key is not known at compile time — both must stay on the helper.
+		$this->assertStringNotContainsString( "[ 'length' ]", $this->compile( '<p>{items.length}</p>' ) );
+		$this->assertStringContainsString( 'getProperty', $this->compile( '<p>{items[key]}</p>' ) );
+	}
+
+	/**
+	 * The inline array read is only valid where it agrees with
+	 * `Evaluator::getProperty()`, so every receiver kind must still match the
+	 * interpreter exactly.
+	 */
+	public function testInlinedMemberAccessMatchesInterpreterForEveryReceiver(): void {
+		$this->assertParity( '<p>{o.title}</p>', [ 'o' => [ 'title' => 'Widget' ] ] );
+		$this->assertParity( '<p>{o.title}</p>', [ 'o' => [] ] );
+		$this->assertParity( '<p>{o.title}</p>', [ 'o' => [ 'title' => null ] ] );
+		$this->assertParity( '<p>{o.title}</p>', [ 'o' => null ] );
+		$this->assertParity( '<p>{o.title}</p>', [ 'o' => 'a string' ] );
+		$this->assertParity( '<p>{o.title}</p>', [ 'o' => 42 ] );
+		$this->assertParity( '<p>{o.length}</p>', [ 'o' => [ 1, 2, 3 ] ] );
+		$this->assertParity( '<p>{o.length}</p>', [ 'o' => 'abcd' ] );
+
+		// A Drop resolves members through beforeMethod, never array access.
+		$interpreter = Template::parse( '<p>{o.title}</p>', Environment::create() )->render( [ 'o' => $this->drop( [ 'title' => 'Widget' ] ) ] );
+		$this->assertSame( $interpreter, $this->render( '<p>{o.title}</p>', [ 'o' => $this->drop( [ 'title' => 'Widget' ] ) ] ) );
+
+		// A plain object exposes public properties.
+		$plain        = new \stdClass();
+		$plain->title = 'Obj';
+		$this->assertSame(
+			Template::parse( '<p>{o.title}</p>', Environment::create() )->render( [ 'o' => $plain ] ),
+			$this->render( '<p>{o.title}</p>', [ 'o' => $plain ] )
+		);
+
+		// ArrayAccess resolves through offsetExists/offsetGet.
+		$arrayAccess = new class() implements \ArrayAccess {
+			/** @var array<string, mixed> */
+			private array $data = [ 'title' => 'AA' ];
+
+			public function offsetExists( mixed $offset ): bool {
+				return isset( $this->data[ $offset ] );
+			}
+
+			public function offsetGet( mixed $offset ): mixed {
+				return $this->data[ $offset ] ?? null;
+			}
+
+			public function offsetSet( mixed $offset, mixed $value ): void {}
+
+			public function offsetUnset( mixed $offset ): void {}
+		};
+		$this->assertSame(
+			Template::parse( '<p>{o.title}</p>', Environment::create() )->render( [ 'o' => $arrayAccess ] ),
+			$this->render( '<p>{o.title}</p>', [ 'o' => $arrayAccess ] )
+		);
+	}
+
+	/**
+	 * A filter pipeline is known at compile time, so it should not be rebuilt as
+	 * a `[[name, args], …]` array and walked by a loop on every evaluation. Each
+	 * filter becomes one direct call instead.
+	 *
+	 * Note the deliberate limit: the *callable* is *not* resolved ahead of the
+	 * value. The interpreter evaluates the value first and only then looks the
+	 * filter up, so resolving earlier would change which error surfaces when
+	 * both the value and the filter name are bad. See
+	 * {@see testFilterErrorOrderingMatchesInterpreter}.
+	 */
+	public function testFilterPipelineCompilesToDirectCallsNotAPipelineArray(): void {
+		$php = $this->compile( '<div>{items.map(i => <span>{i.price | money}</span>)}</div>' );
+
+		$this->assertStringContainsString( '$eval->applyFilter(', $php, 'filter is not applied through a direct call' );
+		$this->assertStringNotContainsString( '$eval->filtered(', $php, 'filter still goes through the pipeline-array walker' );
+		$this->assertStringNotContainsString( "[ [ 'money'", $php, 'pipeline array literal is still emitted' );
+
+		// A multi-filter pipeline nests the calls, innermost filter first.
+		$chained = $this->compile( '<p>{text | upcase | truncate(5)}</p>' );
+		$this->assertStringContainsString( "'upcase'", $chained );
+		$this->assertStringContainsString( "'truncate'", $chained );
+		$this->assertLessThan(
+			strpos( $chained, "'truncate'" ),
+			strpos( $chained, "'upcase'" ),
+			'the first filter in the pipeline must be applied first (innermost call)'
+		);
+	}
+
+	public function testFilterPipelineParity(): void {
+		$data = [
+			'items' => [ [ 'price' => 1000, 'name' => 'ada' ], [ 'price' => 250, 'name' => 'bob' ] ],
+			'text'  => 'hello world',
+			'n'     => 3,
+		];
+
+		$this->assertParity( '<div>{items.map(i => <span>{i.price | money}</span>)}</div>', $data );
+		$this->assertParity( '<p>{text | upcase | truncate(5)}</p>', $data );
+		$this->assertParity( '<p>{n | plus(2) | times(3)}</p>', $data );
+		$this->assertParity( '<div>{items.map(i => i.name | upcase | append("!"))}</div>', $data );
+		$this->assertParity( '<p>{missing | default("fallback")}</p>', $data );
+
+		// A filter argument that depends on the loop variable must still be
+		// evaluated per item.
+		$this->assertParity( '<div>{items.map(i => i.name | append(i.price))}</div>', $data );
+	}
+
+	/**
+	 * The interpreter evaluates a filter's *value* before looking the filter up,
+	 * so when both are broken the value's error is the one that surfaces. The
+	 * compiled path must report the same error — this is what rules out
+	 * resolving filter callables ahead of the value (e.g. hoisting them to the
+	 * top of the render), since PHP resolves a callee before its arguments.
+	 */
+	public function testFilterErrorOrderingMatchesInterpreter(): void {
+		// Two unknown filters: the *first* in the pipeline must be reported.
+		try {
+			$this->render( '<p>{text | inner_missing | outer_missing}</p>', [ 'text' => 'hi' ] );
+			$this->fail( 'Expected UnknownFilterException' );
+		} catch ( UnknownFilterException $e ) {
+			$this->assertStringContainsString( 'inner_missing', $e->getMessage() );
+		}
+
+		// A bad value plus an unknown filter: the value's error wins.
+		$this->expectException( \Phpmystic\Liqx\UndefinedVariableException::class );
+		$this->render( '<p>{nope | no_such_filter}</p>', [], strict: true );
+	}
+
+	/**
+	 * An unknown filter must still raise at render time, and only when the
+	 * expression that uses it is actually evaluated — a never-taken branch must
+	 * not become an eager failure.
+	 */
+	public function testUnknownFilterStillThrowsOnlyWhenEvaluated(): void {
+		$this->expectException( UnknownFilterException::class );
+		$this->render( '<p>{text | no_such_filter}</p>', [ 'text' => 'hi' ] );
+	}
+
+	public function testUnknownFilterInUntakenBranchDoesNotThrow(): void {
+		$source = '<p>{show ? (text | no_such_filter) : "safe"}</p>';
+		$data   = [ 'show' => false, 'text' => 'hi' ];
+
+		$this->assertSame( '<p>safe</p>', Template::parse( $source, Environment::create() )->render( $data ) );
+		$this->assertParity( $source, $data );
 	}
 
 	public function testStaticFrontmatterConstsAreFoldedAtCompileTime(): void {

@@ -377,16 +377,27 @@ final class Evaluator {
 	 */
 	public function filtered( mixed $value, array $pipeline, Context $ctx ): mixed {
 		foreach ( $pipeline as [ $name, $args ] ) {
-			$callable = $ctx->environment->filter( $name );
-
-			if ( null === $callable ) {
-				throw new UnknownFilterException( sprintf( 'Unknown filter %s', $name ) );
-			}
-
-			$value = $callable( $value, ...$args );
+			$value = $this->applyFilter( $value, $name, $ctx, ...$args );
 		}
 
 		return $value;
+	}
+
+	/**
+	 * Apply one filter to a value. The value comes first so callers evaluate it
+	 * before the filter is looked up — the interpreter's order, which decides
+	 * which error surfaces when both the value and the filter name are bad.
+	 * Compiled templates emit one nested call per filter instead of building a
+	 * pipeline array.
+	 */
+	public function applyFilter( mixed $value, string $name, Context $ctx, mixed ...$args ): mixed {
+		$callable = $ctx->environment->filter( $name );
+
+		if ( null === $callable ) {
+			throw new UnknownFilterException( sprintf( 'Unknown filter %s', $name ) );
+		}
+
+		return $callable( $value, ...$args );
 	}
 
 	// ---------------------------------------------------------------------

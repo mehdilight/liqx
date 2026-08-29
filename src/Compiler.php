@@ -529,7 +529,7 @@ final class Compiler {
 		}
 
 		if ( $node instanceof Output ) {
-			return $this->renderValue( $this->expr( $node->expr ) );
+			return $this->outputValue( $node->expr );
 		}
 
 		if ( $node instanceof Element ) {
@@ -592,7 +592,13 @@ final class Compiler {
 				continue;
 			}
 
-			$parts[] = '$eval->attribute( ' . var_export( $name, true ) . ', ' . $this->expr( $value ) . ' )';
+			// `attribute()` exists to apply the boolean/null attribute rules
+			// (`true` prints the bare name, `false`/null omit it). A value that
+			// can only be a string never triggers them, so the name and quotes
+			// bake straight into the artifact.
+			$parts[] = $this->yieldsString( $value )
+				? var_export( ' ' . $name . '="', true ) . ' . ' . $this->expr( $value ) . " . '\"'"
+				: '$eval->attribute( ' . var_export( $name, true ) . ', ' . $this->expr( $value ) . ' )';
 		}
 
 		if ( [] === $parts ) {
@@ -636,7 +642,7 @@ final class Compiler {
 		foreach ( $parts as $part ) {
 			$compiled[] = is_string( $part )
 				? var_export( $part, true )
-				: $this->renderValue( $this->expr( $part ) );
+				: $this->outputValue( $part );
 		}
 
 		return '(' . implode( ' . ', $compiled ) . ')';
@@ -652,6 +658,37 @@ final class Compiler {
 
 	private function renderValue( string $expr ): string {
 		return '$eval->renderValue( ' . $expr . ', $ctx )';
+	}
+
+	/**
+	 * An expression in output position. `renderValue()` exists to apply the
+	 * stringify rules for values whose type is unknown at compile time
+	 * (`false`/null vanish, `true` prints, arrays concatenate); an expression
+	 * that can only ever be a string already satisfies those rules, so the call
+	 * is dead work.
+	 */
+	private function outputValue( Expr $expression, bool $lenient = false ): string {
+		$compiled = $this->expr( $expression, $lenient );
+
+		return $this->yieldsString( $expression ) ? $compiled : $this->renderValue( $compiled );
+	}
+
+	/**
+	 * Whether this expression's value is statically known to be a string, so the
+	 * runtime stringify helpers cannot change it.
+	 */
+	private function yieldsString( Expr $expression ): bool {
+		if ( $expression instanceof Literal ) {
+			return is_string( $expression->value );
+		}
+
+		// A template literal compiles to concatenation, and markup nodes compile
+		// to concatenated tag/attribute/child strings — all strings by
+		// construction.
+		return $expression instanceof TemplateString
+			|| $expression instanceof Element
+			|| $expression instanceof Style
+			|| $expression instanceof Script;
 	}
 
 	// ---------------------------------------------------------------------
@@ -721,12 +758,12 @@ final class Compiler {
 				$object = $this->expr( $expression->object, true );
 				$var    = $this->freshVar();
 
-				return '( ( ( $' . $var . ' = ' . $object . ' ) === null ) ? null : $eval->getProperty( $' . $var . ', ' . $key . ' ) )';
+				return '( ( ( $' . $var . ' = ' . $object . ' ) === null ) ? null : ' . $this->propertyRead( '$' . $var, $key, $expression ) . ' )';
 			}
 
 			$object = $this->expr( $expression->object, $lenient );
 
-			return '( $eval->getProperty( ' . $object . ', ' . $key . ' ) )';
+			return '( ' . $this->propertyRead( $object, $key, $expression ) . ' )';
 		}
 
 		if ( $expression instanceof Call ) {
@@ -782,15 +819,7 @@ final class Compiler {
 		}
 
 		if ( $expression instanceof TemplateString ) {
-			$parts = [];
-
-			foreach ( $expression->parts as $part ) {
-				$parts[] = is_string( $part )
-					? var_export( $part, true )
-					: $this->expr( $part, $lenient );
-			}
-
-			return '( $eval->templateString( [ ' . implode( ', ', $parts ) . ' ], $ctx ) )';
+			return $this->templateString( $expression, $lenient );
 		}
 
 		if ( $expression instanceof Filtered ) {
@@ -810,6 +839,42 @@ final class Compiler {
 		}
 
 		throw new LiqxException( 'Cannot compile expression node ' . $expression::class );
+	}
+
+	/**
+	 * A property read. The overwhelmingly common receiver is a plain array with
+	 * a compile-time-known key, so that case is emitted inline and only other
+	 * receivers (objects, Drops, ArrayAccess, strings) fall through to
+	 * {@see Evaluator::getProperty()} — the same helper, unchanged semantics,
+	 * one fewer method call per access on the hot path.
+	 *
+	 * The receiver is bound to a temp so it is evaluated exactly once even
+	 * though both branches read it; a receiver that is already a plain local
+	 * skips the temp.
+	 *
+	 * `length` never takes the fast path: on an array it means `count()`, not a
+	 * key lookup.
+	 */
+	private function propertyRead( string $object, string $key, Member $expression ): string {
+		if ( $expression->computed || 'length' === (string) $expression->access ) {
+			return '$eval->getProperty( ' . $object . ', ' . $key . ' )';
+		}
+
+		$operand = trim( $object );
+
+		// Strip the redundant parens the emitter wraps operands in, so a bound
+		// local (`( $__v0 )`) is recognised as the simple variable it is.
+		while ( str_starts_with( $operand, '(' ) && str_ends_with( $operand, ')' ) ) {
+			$operand = trim( substr( $operand, 1, -1 ) );
+		}
+
+		if ( 1 === preg_match( '/^\$[A-Za-z_][A-Za-z0-9_]*$/', $operand ) ) {
+			return '( is_array( ' . $operand . ' ) ? ( ' . $operand . '[ ' . $key . ' ] ?? null ) : $eval->getProperty( ' . $operand . ', ' . $key . ' ) )';
+		}
+
+		$temp = '$' . $this->freshVar();
+
+		return '( is_array( ' . $temp . ' = ' . $object . ' ) ? ( ' . $temp . '[ ' . $key . ' ] ?? null ) : $eval->getProperty( ' . $temp . ', ' . $key . ' ) )';
 	}
 
 	/**
@@ -885,14 +950,56 @@ final class Compiler {
 	}
 
 	private function filtered( Filtered $expression, bool $lenient ): string {
-		$pipeline = [];
+		// Each filter becomes one direct `applyFilter` call, nested so the first
+		// filter in the pipeline is the innermost (and therefore first-applied)
+		// call — no pipeline array is rebuilt or walked per evaluation.
+		//
+		// The callable is deliberately *not* resolved ahead of the value: the
+		// interpreter evaluates the value first and only then looks the filter
+		// up, so hoisting the lookup would change which error surfaces when both
+		// are bad (PHP resolves a callee before its arguments).
+		$out = $this->expr( $expression->value, $lenient );
 
 		foreach ( $expression->filters as $filter ) {
-			$args      = $this->argList( $filter->args, $lenient );
-			$pipeline[] = '[ ' . var_export( $filter->name, true ) . ', [ ' . $args . ' ] ]';
+			$args = $this->argList( $filter->args, $lenient );
+
+			$out = '( $eval->applyFilter( ' . $out . ', ' . var_export( $filter->name, true ) . ', $ctx'
+				. ( '' === $args ? '' : ', ' . $args ) . ' ) )';
 		}
 
-		return '( $eval->filtered( ' . $this->expr( $expression->value, $lenient ) . ', [ ' . implode( ', ', $pipeline ) . ' ], $ctx ) )';
+		return $out;
+	}
+
+	/**
+	 * A template literal lowers to native PHP concatenation. Literal segments
+	 * are known here, so they become string literals in the artifact instead of
+	 * array elements a helper walks on every render.
+	 *
+	 * Interpolations still stringify through `renderValue` — exactly what
+	 * {@see Evaluator::templateString()} does per part — so the result is
+	 * unchanged for every value shape (`false`/null vanish, `true` prints,
+	 * arrays concatenate their items, objects without `__toString` vanish).
+	 */
+	private function templateString( TemplateString $expression, bool $lenient ): string {
+		if ( [] === $expression->parts ) {
+			return "( '' )";
+		}
+
+		$parts = [];
+
+		foreach ( $expression->parts as $part ) {
+			$parts[] = is_string( $part )
+				? var_export( $part, true )
+				: $this->outputValue( $part, $lenient );
+		}
+
+		// A template literal always yields a string, so a lone interpolation
+		// still needs the concat to coerce it (`` `${n}` `` is "1", not 1).
+		if ( 1 === count( $parts ) && ! is_string( $expression->parts[0] ) ) {
+			return "( '' . " . $parts[0] . ' )';
+		}
+
+		return '( ' . implode( ' . ', $parts ) . ' )';
 	}
 
 	/**
