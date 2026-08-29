@@ -585,6 +585,100 @@ final class CompiledTemplateTest extends TestCase {
 		}
 	}
 
+	/**
+	 * Frontmatter consts are written once and read many times, yet every read
+	 * went back through `$ctx->get()`, which walks the scope stack from the
+	 * innermost scope out. The compiler knows these names, so a read can hit a
+	 * PHP local instead.
+	 *
+	 * The write to the Context stays: a const must remain visible by *name* to
+	 * things the compiler cannot see through — a `<schema>` validation pass, and
+	 * nested `section()` renders that inherit the parent scope. So the emitted
+	 * code writes both and reads the local.
+	 */
+	public function testFrontmatterConstsReadFromLocalsButStayVisibleByName(): void {
+		$php = $this->compile( "---\nconst layout = settings.layout;\n---\n<div class={layout}>{layout}</div>" );
+
+		// Still published to the Context under its name...
+		$this->assertStringContainsString( "\$ctx->set( 'layout'", $php );
+
+		// ...but the body reads the local, not the scope stack.
+		$this->assertStringNotContainsString( "\$ctx->get( 'layout' )", $php, 'a frontmatter const is still read through the scope stack' );
+		$this->assertStringNotContainsString( "identifier( \$ctx, 'layout' )", $php, 'a frontmatter const is still read through the scope stack' );
+	}
+
+	/**
+	 * The Context write is what keeps a const visible to a nested section
+	 * render, which resolves names against the inherited parent scope and cannot
+	 * see the parent's PHP locals.
+	 */
+	public function testFrontmatterConstsStayVisibleToNestedSectionRenders(): void {
+		$dir = sys_get_temp_dir() . '/liqx-sec-' . bin2hex( random_bytes( 4 ) );
+		mkdir( $dir . '/sections', 0777, true );
+		file_put_contents( $dir . '/sections/child.liqx', '<b>{outerConst}</b>' );
+
+		$source = "---\nconst outerConst = 'FM-VALUE';\n---\n<div>{section('child')}</div>";
+
+		$interpreterEnv = Environment::create();
+		$interpreterEnv->setSectionFileSystem( new LocalFileSystem( $dir . '/sections' ) );
+
+		$compiledEnv = Environment::create();
+		$compiledEnv->setSectionFileSystem( new LocalFileSystem( $dir . '/sections' ) );
+		$compiledEnv->setCompiledTemplateDir( $this->cacheDir );
+
+		$interpreter = Template::parse( $source, $interpreterEnv )->render( [] );
+		$compiled    = Template::parse( $source, $compiledEnv )->render( [] );
+
+		$this->assertStringContainsString( 'FM-VALUE', $interpreter, 'the nested section should see the parent const' );
+		$this->assertSame( $interpreter, $compiled );
+
+		$this->removeDir( $dir );
+	}
+
+	public function testFrontmatterConstParityIncludingShadowingAndStrictMode(): void {
+		$data = [
+			'settings' => [ 'layout' => 'wide' ],
+			'product'  => [ 'title' => 'Widget', 'price' => 10, 'compare_at_price' => 20 ],
+			'items'    => [ [ 'n' => 1 ], [ 'n' => 2 ] ],
+		];
+
+		// Plain const, a const derived from another, and a destructure.
+		$this->assertParity( "---\nconst layout = settings.layout;\n---\n<div class={layout}>{layout}</div>", $data );
+		$this->assertParity( "---\nconst a = product.price;\nconst b = a * 2;\n---\n<p>{b}</p>", $data );
+		$this->assertParity( "---\nconst { title, missing = 'dflt' } = product;\n---\n<p>{title}/{missing}</p>", $data );
+
+		// A const that is null/false must still shadow outer data of the same
+		// name — the local read has to agree with array_key_exists semantics.
+		$this->assertParity( "---\nconst product = null;\n---\n<p>[{product}]</p>", $data );
+		$this->assertParity( "---\nconst settings = false;\n---\n<p>[{settings}]</p>", $data );
+
+		// An arrow parameter shadows a frontmatter const of the same name inside
+		// the closure, and the const is visible again after it.
+		$this->assertParity( "---\nconst n = 99;\n---\n<div>{items.map(n => <i>{n.n}</i>)}{n}</div>", $data );
+
+		// Strict mode: a const is defined, so no UndefinedVariableException.
+		$this->assertParity( "---\nconst layout = settings.layout;\n---\n<div>{layout}</div>", $data, strict: true );
+
+		// Strict mode still reports a genuinely undefined name.
+		$this->expectException( \Phpmystic\Liqx\UndefinedVariableException::class );
+		$this->render( "---\nconst layout = settings.layout;\n---\n<div>{nope}</div>", $data, strict: true );
+	}
+
+	/**
+	 * A frontmatter `return { … };` becomes `props`, which the schema validator
+	 * reads back by name from the Context — so `props` must keep its Context
+	 * write even though the body may read it from a local.
+	 */
+	public function testFrontmatterPropsRemainAvailableToSchemaValidation(): void {
+		$source = "---\nconst n = value;\nreturn { count: n };\n---\n<p>{props.count}</p><schema>\n{ \"props\": { \"count\": \"int\" } }\n</schema>";
+
+		$this->assertSame( '<p>4</p>', $this->render( $source, [ 'value' => 4 ] ) );
+
+		$this->expectException( \Phpmystic\Liqx\LiqxException::class );
+		$this->expectExceptionMessage( 'Schema type mismatch' );
+		$this->render( $source, [ 'value' => 'not-an-int' ] );
+	}
+
 	public function testStaticFrontmatterConstsAreFoldedAtCompileTime(): void {
 		$source = "---\nconst base = 100;\nconst tax = base * 2;\n---\n<p>{tax}</p>";
 
@@ -593,7 +687,9 @@ final class CompiledTemplateTest extends TestCase {
 
 		// A chain of static consts is resolved to a single literal at compile
 		// time — the runtime must not recompute `base * 2` on every render.
-		$this->assertStringContainsString( "set( 'tax', 200 );", $php );
+		// (The const is published to the Context and bound to a local in one
+		// statement, so the literal appears as `set( 'tax', $__vN = 200 )`.)
+		$this->assertMatchesRegularExpression( "/set\( 'tax', \\\$__v\\d+ = 200 \)/", $php );
 		$this->assertStringNotContainsString( ' * 2', $php );
 
 		// Object/array literal trees fold to PHP literals (no per-invocation eval).

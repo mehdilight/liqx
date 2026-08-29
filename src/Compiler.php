@@ -178,6 +178,13 @@ final class Compiler {
 
 	public function compile( Document $document ): string {
 		$this->staticConsts = [];
+
+		// The document's own scope: frontmatter consts bind here, so nested
+		// closures capture them via `use` like any other enclosing local.
+		$this->scopeStack   = [ [] ];
+		$this->closureStart = 0;
+		$this->captures     = [];
+
 		$lines = [];
 
 		$lines[] = '<?php';
@@ -195,9 +202,16 @@ final class Compiler {
 			}
 		}
 
-		// A frontmatter `return { … };` becomes the body's `props`.
+		// A frontmatter `return { … };` becomes the body's `props`. It is written
+		// to the Context as well as a local because the schema validator reads
+		// `props` back by name.
 		if ( null !== $document->frontmatterReturn ) {
-			$lines[] = '        $ctx->set( \'props\', ' . $this->expr( $document->frontmatterReturn ) . ' );';
+			$init = $this->expr( $document->frontmatterReturn );
+			$var  = $this->freshVar();
+
+			$lines[] = '        $ctx->set( \'props\', $' . $var . ' = ' . $init . ' );';
+
+			$this->bindLocal( 'props', $var );
 		}
 
 		$hasTemplateBlock = false;
@@ -235,7 +249,15 @@ final class Compiler {
 	// ---------------------------------------------------------------------
 
 	/**
-	 * @return list<string> PHP statements (no trailing semicolon)
+	 * Document-level frontmatter declarations.
+	 *
+	 * Each const is written to the Context *and* bound to a PHP local: the
+	 * Context write keeps the name visible to things the compiler cannot see
+	 * through (schema validation reading `props` back, nested `section()`
+	 * renders that inherit the parent scope), while the local is what the body
+	 * reads — a direct variable instead of a scope-stack walk per read.
+	 *
+	 * @return list<string> PHP statements
 	 */
 	private function declarationLines( Frontmatter|FrontmatterDestructure $declaration ): array {
 		if ( $declaration instanceof FrontmatterDestructure ) {
@@ -244,9 +266,16 @@ final class Compiler {
 
 			foreach ( $declaration->bindings as $binding ) {
 				$default = null !== $binding['default'] ? $this->expr( $binding['default'] ) : 'null';
+				$var     = $this->freshVar();
+
 				$lines[] = '$ctx->set( '
 					. var_export( $binding['name'], true )
-					. ', ( ( $__hit = $eval->lookupProperty( $__src, ' . var_export( $binding['name'], true ) . ' ) )[\'found\'] ? $__hit[\'value\'] : ' . $default . ' ) );';
+					. ', $' . $var . ' = ( ( $__hit = $eval->lookupProperty( $__src, ' . var_export( $binding['name'], true ) . ' ) )[\'found\'] ? $__hit[\'value\'] : ' . $default . ' ) );';
+
+				// Bound after its own initializer is compiled, so a binding that
+				// references an outer name of the same identifier still reads the
+				// outer one.
+				$this->bindLocal( $binding['name'], $var );
 			}
 
 			return $lines;
@@ -259,13 +288,25 @@ final class Compiler {
 
 		if ( $static['folded'] ) {
 			$this->staticConsts[ $declaration->name ] = $static['value'];
+			$var                                      = $this->freshVar();
 
-			return [ '$ctx->set( ' . var_export( $declaration->name, true ) . ', ' . var_export( $static['value'], true ) . ' );' ];
+			$line = '$ctx->set( ' . var_export( $declaration->name, true ) . ', $' . $var . ' = ' . var_export( $static['value'], true ) . ' );';
+
+			$this->bindLocal( $declaration->name, $var );
+
+			return [ $line ];
 		}
 
 		unset( $this->staticConsts[ $declaration->name ] );
 
-		return [ '$ctx->set( ' . var_export( $declaration->name, true ) . ', ' . $this->expr( $declaration->expr ) . ' );' ];
+		$init = $this->expr( $declaration->expr );
+		$var  = $this->freshVar();
+		$line = '$ctx->set( ' . var_export( $declaration->name, true ) . ', $' . $var . ' = ' . $init . ' );';
+
+		// Bound after the initializer compiles: `const x = x` reads the outer x.
+		$this->bindLocal( $declaration->name, $var );
+
+		return [ $line ];
 	}
 
 	/**
