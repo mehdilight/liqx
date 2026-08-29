@@ -252,4 +252,107 @@ final class CompositionTest extends TestCase {
 		$this->expectException( \Phpmystic\Liqx\FileSystemException::class );
 		$this->render( '{render("does-not-exist")}' );
 	}
+
+	/**
+	 * The partial cache must be keyed by the FileSystem *identity*, not by
+	 * `spl_object_id()`: PHP reuses an object id once the original is collected,
+	 * so a short-lived FileSystem (hosts commonly build one per render) could
+	 * inherit the cache entry of a freed one and serve the wrong source under
+	 * the same name.
+	 */
+	public function testPartialCacheIsNotConfusedByAReusedObjectId(): void {
+		$first = new InMemoryFileSystem( '<p>FIRST</p>' );
+		$firstId = spl_object_id( $first );
+
+		$this->assertSame( '<p>FIRST</p>', $this->env->renderPartial( 'header', $first ) );
+
+		// Free it so PHP can hand its id to the next object.
+		unset( $first );
+
+		$second = new InMemoryFileSystem( '<p>SECOND</p>' );
+
+		// The reused id is what made this fail; assert we actually reproduced
+		// the condition, so the test cannot silently stop covering it.
+		$this->assertSame( $firstId, spl_object_id( $second ), 'PHP did not reuse the object id — the scenario was not reproduced' );
+		$this->assertSame( '<p>SECOND</p>', $this->env->renderPartial( 'header', $second ) );
+	}
+
+	public function testPartialCacheIsNotConfusedByAReusedObjectIdInCompiledMode(): void {
+		$this->env->setCompiledTemplateDir( $this->root . '/compiled' );
+
+		$first   = new InMemoryFileSystem( '<p>FIRST</p>' );
+		$firstId = spl_object_id( $first );
+
+		$this->assertSame( '<p>FIRST</p>', $this->env->renderPartial( 'header', $first ) );
+
+		unset( $first );
+
+		$second = new InMemoryFileSystem( '<p>SECOND</p>' );
+
+		$this->assertSame( $firstId, spl_object_id( $second ), 'PHP did not reuse the object id — the scenario was not reproduced' );
+		$this->assertSame( '<p>SECOND</p>', $this->env->renderPartial( 'header', $second ) );
+	}
+
+	/**
+	 * Two FileSystems alive at the same time must keep separate cache entries —
+	 * the same name resolves differently through each.
+	 */
+	public function testConcurrentFileSystemsCacheIndependently(): void {
+		$a = new InMemoryFileSystem( '<p>A</p>' );
+		$b = new InMemoryFileSystem( '<p>B</p>' );
+
+		$this->assertSame( '<p>A</p>', $this->env->renderPartial( 'header', $a ) );
+		$this->assertSame( '<p>B</p>', $this->env->renderPartial( 'header', $b ) );
+
+		// And each still hits its own cached entry on a second call.
+		$this->assertSame( '<p>A</p>', $this->env->renderPartial( 'header', $a ) );
+		$this->assertSame( '<p>B</p>', $this->env->renderPartial( 'header', $b ) );
+	}
+
+	/** The cache must still work — a repeated render parses the source once. */
+	public function testPartialCacheStillAvoidsReparsing(): void {
+		$fs = new InMemoryFileSystem( '<p>{props.n}</p>' );
+
+		for ( $i = 0; $i < 5; $i++ ) {
+			$this->env->renderPartial( 'card', $fs, [ 'props' => [ 'n' => $i ] ] );
+		}
+
+		$this->assertSame( 1, $fs->loads, 'the partial source was re-read instead of served from cache' );
+	}
+
+	/**
+	 * A host that builds a FileSystem per render must not accumulate cache
+	 * entries for every one it ever used. Keying weakly means a collected
+	 * FileSystem takes its entry with it.
+	 */
+	public function testPartialCacheDoesNotGrowForCollectedFileSystems(): void {
+		for ( $i = 0; $i < 50; $i++ ) {
+			$this->env->renderPartial( 'header', new InMemoryFileSystem( '<p>' . $i . '</p>' ) );
+		}
+
+		$this->assertLessThanOrEqual( 1, $this->cachedFileSystemCount(), 'the partial cache retained entries for collected FileSystems' );
+	}
+
+	private function cachedFileSystemCount(): int {
+		$property = new \ReflectionProperty( Environment::class, 'partials' );
+
+		/** @var \WeakMap<\Phpmystic\Liqx\FileSystem, array<string, Template>> $map */
+		$map = $property->getValue( $this->env );
+
+		return count( $map );
+	}
+}
+
+/** A FileSystem with no filesystem behind it, counting how often it is read. */
+final class InMemoryFileSystem implements \Phpmystic\Liqx\FileSystem {
+
+	public int $loads = 0;
+
+	public function __construct( private string $source ) {}
+
+	public function load( string $name ): string {
+		++$this->loads;
+
+		return $this->source;
+	}
 }

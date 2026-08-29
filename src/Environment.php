@@ -27,13 +27,33 @@ final class Environment {
 
 	private ?FileSystem $sectionFileSystem = null;
 
-	/** @var array<string, Template> parsed named templates, keyed by fs+name */
-	private array $partials = [];
+	/**
+	 * Parsed named templates, keyed by the FileSystem that resolved them.
+	 *
+	 * Weakly keyed on purpose: hosts commonly build a FileSystem per render, and
+	 * PHP reuses an object id once the original is collected — an id-keyed cache
+	 * could hand a fresh FileSystem the entry of a freed one and serve the wrong
+	 * source under the same name. A WeakMap keys on identity and drops the entry
+	 * with the object, so it cannot go stale and cannot grow unboundedly.
+	 *
+	 * @var \WeakMap<FileSystem, array<string, Template>>
+	 */
+	private \WeakMap $partials;
 
 	private ?string $compiledTemplateDir = null;
 
-	/** @var array<string, CompiledTemplate> compiled named templates, keyed by fs+name */
-	private array $compiledTemplates = [];
+	/**
+	 * Compiled named templates, keyed by FileSystem — see {@see $partials} for
+	 * why this is weak.
+	 *
+	 * @var \WeakMap<FileSystem, array<string, CompiledTemplate>>
+	 */
+	private \WeakMap $compiledTemplates;
+
+	public function __construct() {
+		$this->partials          = new \WeakMap();
+		$this->compiledTemplates = new \WeakMap();
+	}
 
 	private static ?Environment $default = null;
 
@@ -134,7 +154,7 @@ final class Environment {
 
 	/** Drop in-memory compiled closures and any `.php` artifacts in the cache dir. */
 	public function clearCompiledTemplates(): void {
-		$this->compiledTemplates = [];
+		$this->compiledTemplates = new \WeakMap();
 
 		// The memoized `<schema>` sidecar answers are keyed by sidecar path, and
 		// those paths are about to stop existing. Dropping them keeps a
@@ -172,22 +192,38 @@ final class Environment {
 	 * @param array{tag?: string, attrs?: array<string, mixed>|string}|null $wrapper
 	 */
 	public function renderPartial( string $name, FileSystem $fileSystem, array $data = [], ?Context $parent = null, ?array $wrapper = null ): string {
-		$key = spl_object_id( $fileSystem ) . ':' . $name;
-
 		if ( null !== $this->compiledTemplateDir ) {
-			$compiled = $this->compiledTemplates[ $key ] ??= $this->compilePartial( $name, $fileSystem, $key );
+			$compiled = $this->compiledTemplates[ $fileSystem ][ $name ] ?? null;
+
+			if ( ! $compiled instanceof CompiledTemplate ) {
+				$compiled = $this->compilePartial( $name, $fileSystem );
+
+				// A WeakMap value cannot be modified in place, so the per-name
+				// map is read, extended and written back whole.
+				$byName                                  = $this->compiledTemplates[ $fileSystem ] ?? [];
+				$byName[ $name ]                         = $compiled;
+				$this->compiledTemplates[ $fileSystem ] = $byName;
+			}
 
 			return null !== $parent
 				? $compiled->renderIn( $this, $data, $parent, false, $wrapper )
 				: $compiled->render( $this, $data, false, $wrapper );
 		}
 
-		$template  = $this->partials[ $key ] ??= Template::parse( $fileSystem->load( $name ), $this, $name );
+		$template = $this->partials[ $fileSystem ][ $name ] ?? null;
+
+		if ( ! $template instanceof Template ) {
+			$template = Template::parse( $fileSystem->load( $name ), $this, $name );
+
+			$byName                          = $this->partials[ $fileSystem ] ?? [];
+			$byName[ $name ]                 = $template;
+			$this->partials[ $fileSystem ] = $byName;
+		}
 
 		return null !== $parent ? $template->renderIn( $data, $parent, false, $wrapper ) : $template->render( $data, false, $wrapper );
 	}
 
-	private function compilePartial( string $name, FileSystem $fileSystem, string $key ): CompiledTemplate {
+	private function compilePartial( string $name, FileSystem $fileSystem ): CompiledTemplate {
 		$dir = $this->compiledTemplateDir;
 
 		if ( null === $dir ) {
