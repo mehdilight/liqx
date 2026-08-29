@@ -4,10 +4,12 @@ declare( strict_types=1 );
 namespace Phpmystic\Liqx;
 
 use Phpmystic\Liqx\Node\Document;
+use Phpmystic\Liqx\Node\Element;
 use Phpmystic\Liqx\Node\Frontmatter;
 use Phpmystic\Liqx\Node\FrontmatterDestructure;
 use Phpmystic\Liqx\Node\Schema;
 use Phpmystic\Liqx\Node\Style;
+use Phpmystic\Liqx\Node\TemplateBlock;
 
 /**
  * Document-level parser. Reads the flat token stream produced by the Lexer
@@ -54,6 +56,28 @@ use Phpmystic\Liqx\Node\Style;
 				// Styles render inline where they appear; the last one is also
 				// kept for hosts that want to collect a document's scoped CSS.
 				$style = $node;
+			}
+
+			if ( $node instanceof Element && 'template' === strtolower( $node->tag ) ) {
+				$templateChildren = [];
+
+				foreach ( $node->children as $child ) {
+					if ( $child instanceof Schema ) {
+						$schema = $child;
+
+						continue;
+					}
+
+					if ( $child instanceof Style ) {
+						$style = $child;
+					}
+
+					$templateChildren[] = $child;
+				}
+
+				$body[] = new TemplateBlock( $templateChildren, $node->attrs, $node->line );
+
+				continue;
 			}
 
 			if ( null !== $node ) {

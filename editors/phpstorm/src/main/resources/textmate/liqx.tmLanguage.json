@@ -1,0 +1,197 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Liqx",
+  "scopeName": "text.html.liqx",
+  "patterns": [
+    { "include": "#frontmatter" },
+    { "include": "#verbatim-style" },
+    { "include": "#verbatim-script" },
+    { "include": "#verbatim-schema" },
+    { "include": "#comment" },
+    { "include": "#expression" },
+    { "include": "text.html.basic" }
+  ],
+  "injections": {
+    "L:text.html.liqx meta.tag": {
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#expression" }
+      ]
+    }
+  },
+  "repository": {
+    "frontmatter": {
+      "name": "meta.frontmatter.liqx",
+      "begin": "\\A(---)[ \\t]*$",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.frontmatter.begin.liqx" }
+      },
+      "end": "^(---)[ \\t]*$",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.frontmatter.end.liqx" }
+      },
+      "contentName": "meta.embedded.block.js",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "source.js" }
+      ]
+    },
+
+    "comment": {
+      "name": "comment.block.liqx",
+      "begin": "\\{/\\*",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.comment.begin.liqx" }
+      },
+      "end": "\\*/\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.comment.end.liqx" }
+      }
+    },
+
+    "expression": {
+      "name": "meta.embedded.expression.liqx",
+      "begin": "\\{",
+      "beginCaptures": {
+        "0": { "name": "punctuation.section.embedded.begin.liqx" }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": { "name": "punctuation.section.embedded.end.liqx" }
+      },
+      "contentName": "meta.embedded.block.js",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#brace-pair" },
+        { "include": "source.js" }
+      ]
+    },
+
+    "brace-pair": {
+      "comment": "Balances nested { } (object literals, blocks) so the outer expression end does not fire early.",
+      "begin": "\\{",
+      "end": "\\}",
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#brace-pair" },
+        { "include": "source.js" }
+      ]
+    },
+
+    "verbatim-style": {
+      "name": "meta.embedded.block.style.liqx",
+      "begin": "(?i)(<)(style)\\b",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.liqx" },
+        "2": { "name": "entity.name.tag.liqx" }
+      },
+      "end": "(?i)(</)(style)[ \\t]*(>)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.liqx" },
+        "2": { "name": "entity.name.tag.liqx" },
+        "3": { "name": "punctuation.definition.tag.end.liqx" }
+      },
+      "patterns": [
+        {
+          "begin": ">",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.tag.end.liqx" }
+          },
+          "end": "(?i)(?=</style>)",
+          "contentName": "meta.embedded.block.css",
+          "patterns": [
+            { "include": "#comment" },
+            { "include": "#expression" },
+            { "include": "source.css" }
+          ]
+        },
+        { "include": "#tag-attributes" }
+      ]
+    },
+
+    "verbatim-script": {
+      "name": "meta.embedded.block.script.liqx",
+      "begin": "(?i)(<)(script)\\b",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.liqx" },
+        "2": { "name": "entity.name.tag.liqx" }
+      },
+      "end": "(?i)(</)(script)[ \\t]*(>)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.liqx" },
+        "2": { "name": "entity.name.tag.liqx" },
+        "3": { "name": "punctuation.definition.tag.end.liqx" }
+      },
+      "patterns": [
+        {
+          "begin": ">",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.tag.end.liqx" }
+          },
+          "end": "(?i)(?=</script>)",
+          "contentName": "meta.embedded.block.js",
+          "patterns": [
+            { "include": "#comment" },
+            { "include": "#expression" },
+            { "include": "source.js" }
+          ]
+        },
+        { "include": "#tag-attributes" }
+      ]
+    },
+
+    "verbatim-schema": {
+      "name": "meta.embedded.block.schema.liqx",
+      "begin": "(?i)(<)(schema)\\b",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.liqx" },
+        "2": { "name": "entity.name.tag.liqx" }
+      },
+      "end": "(?i)(</)(schema)[ \\t]*(>)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.liqx" },
+        "2": { "name": "entity.name.tag.liqx" },
+        "3": { "name": "punctuation.definition.tag.end.liqx" }
+      },
+      "patterns": [
+        {
+          "begin": ">",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.tag.end.liqx" }
+          },
+          "end": "(?i)(?=</schema>)",
+          "contentName": "meta.embedded.block.json",
+          "patterns": [
+            { "include": "source.json" }
+          ]
+        },
+        { "include": "#tag-attributes" }
+      ]
+    },
+
+    "tag-attributes": {
+      "patterns": [
+        { "include": "#comment" },
+        { "include": "#expression" },
+        {
+          "match": "(?i)([a-z_:][-\\w:.]*)",
+          "name": "entity.other.attribute-name.liqx"
+        },
+        {
+          "match": "=",
+          "name": "punctuation.separator.key-value.liqx"
+        },
+        {
+          "begin": "\"",
+          "end": "\"",
+          "name": "string.quoted.double.liqx"
+        },
+        {
+          "begin": "'",
+          "end": "'",
+          "name": "string.quoted.single.liqx"
+        }
+      ]
+    }
+  }
+}

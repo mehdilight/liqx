@@ -36,13 +36,27 @@ Without frontmatter, just start with the body:
 
 ## Body
 
-Everything after the frontmatter (or from the top, if there is none). Free
-mix of:
+The render body can be wrapped in `<template>...</template>` (which is omitted from the final rendered HTML output), or written directly:
 
 * plain text / HTML
 * JSX elements — [elements-and-attributes.md](./03-elements-and-attributes.md)
 * `{ expression }` interpolation — [expressions.md](./02-expressions.md)
 * `{/* comments */}` — never rendered
+
+```liqx
+---
+const heading = section.settings.heading;
+---
+<template>
+  <section>
+    <h1>{heading}</h1>
+  </section>
+</template>
+
+<schema>
+{ "name": "Hero" }
+</schema>
+```
 
 ## `<style>`, `<script>`, `<schema>`
 

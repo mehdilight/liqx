@@ -74,24 +74,33 @@ final class CompiledTemplate {
 		return $result;
 	}
 
-	/** @param array<string, mixed> $data */
-	public function render( Environment $environment, array $data = [], bool $strict = false ): string {
-		return $this->renderContext( new Context( $environment, $strict, $data ) );
+	/**
+	 * @param array<string, mixed> $data
+	 * @param array{tag?: string, attrs?: array<string, mixed>|string}|null $wrapper
+	 */
+	public function render( Environment $environment, array $data = [], bool $strict = false, ?array $wrapper = null ): string {
+		return $this->renderContext( new Context( $environment, $strict, $data ), $wrapper );
 	}
 
 	/**
 	 * @param array<string, mixed> $data
+	 * @param array{tag?: string, attrs?: array<string, mixed>|string}|null $wrapper
 	 */
-	public function renderIn( Environment $environment, array $data, Context $parent, bool $strict = false ): string {
+	public function renderIn( Environment $environment, array $data, Context $parent, bool $strict = false, ?array $wrapper = null ): string {
 		return $this->renderContext(
-			Context::inherit( $environment, $strict || $parent->strict, $parent, $data )
+			Context::inherit( $environment, $strict || $parent->strict, $parent, $data ),
+			$wrapper
 		);
 	}
 
-	/** Render into a caller-built context. */
-	public function renderContext( Context $context ): string {
+	/**
+	 * Render into a caller-built context.
+	 *
+	 * @param array{tag?: string, attrs?: array<string, mixed>|string}|null $wrapper
+	 */
+	public function renderContext( Context $context, ?array $wrapper = null ): string {
 		try {
-			return ( $this->render )( $context, self::evaluator() );
+			return ( $this->render )( $context, self::evaluator(), $wrapper );
 		} catch ( LiqxException $e ) {
 			if ( null === $e->templateName && '' !== $this->name ) {
 				$e->templateName = $this->name;

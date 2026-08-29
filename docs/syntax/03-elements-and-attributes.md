@@ -52,6 +52,33 @@ output** — it never appears in the HTML. Also skipped when spreading.
 Void elements: `area base br col embed hr img input link meta param source
 track wbr`.
 
+## `<template>` Wrapper (SFC) & HTML5 Templates
+
+Like Vue SFCs, a **top-level** `<template>...</template>` wraps the document body and is unwrapped during rendering (the outer tag is not emitted into the HTML).
+
+Any **inner** `<template>` tags inside the body (e.g. `<template id="row-tpl">`) are preserved in the HTML output for client-side JavaScript / Web Components.
+
+```liqx
+<template>
+  <div class="app">
+    <!-- Inner HTML5 template: preserved in DOM for JS -->
+    <template id="row-tpl">
+      <tr><td>Placeholder</td></tr>
+    </template>
+  </div>
+</template>
+```
+Renders:
+```html
+<div class="app">
+  <template id="row-tpl">
+    <tr><td>Placeholder</td></tr>
+  </template>
+</div>
+```
+
+Self-closing top-level `<template />` renders nothing (`""`).
+
 ## Elements as expression values
 
 ```liqx

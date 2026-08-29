@@ -143,11 +143,14 @@ final class Template {
 		return $clone;
 	}
 
-	/** @param array<string, mixed> $data */
-	public function render( array $data = [], bool $strict = false ): string {
+	/**
+	 * @param array<string, mixed> $data
+	 * @param array{tag?: string, attrs?: array<string, mixed>|string}|null $wrapper
+	 */
+	public function render( array $data = [], bool $strict = false, ?array $wrapper = null ): string {
 		$context = new Context( $this->environment, $strict, $data );
 
-		return $this->renderContext( $context );
+		return $this->renderContext( $context, $wrapper );
 	}
 
 	/**
@@ -155,18 +158,21 @@ final class Template {
 	 * section renders share the page scope.
 	 *
 	 * @param array<string, mixed> $data
+	 * @param array{tag?: string, attrs?: array<string, mixed>|string}|null $wrapper
 	 */
-	public function renderIn( array $data, Context $parent, bool $strict = false ): string {
+	public function renderIn( array $data, Context $parent, bool $strict = false, ?array $wrapper = null ): string {
 		$context = Context::inherit( $this->environment, $strict || $parent->strict, $parent, $data );
 
-		return $this->renderContext( $context );
+		return $this->renderContext( $context, $wrapper );
 	}
 
 	/**
 	 * Render into a caller-built context — used by hosts that stage extra
 	 * scope (e.g. block children) on the context before rendering.
+	 *
+	 * @param array{tag?: string, attrs?: array<string, mixed>|string}|null $wrapper
 	 */
-	public function renderContext( Context $context ): string {
+	public function renderContext( Context $context, ?array $wrapper = null ): string {
 		if ( null !== $this->environment->compiledTemplateDir() ) {
 			// A warm artifact means the source already parsed and compiled once.
 			// Only re-parse when the template actually declares a `<schema>` and
@@ -175,7 +181,7 @@ final class Template {
 				$this->validateFrontmatterTypes( $this->document(), $context );
 			}
 
-			return $this->compiled()->renderContext( $context );
+			return $this->compiled()->renderContext( $context, $wrapper );
 		}
 
 		$document = $this->document();
@@ -185,7 +191,7 @@ final class Template {
 		}
 
 		try {
-			return self::renderer()->render( $document, $context );
+			return self::renderer()->render( $document, $context, $wrapper );
 		} catch ( LiqxException $e ) {
 			if ( null === $e->templateName && '' !== $this->name ) {
 				$e->templateName = $this->name;

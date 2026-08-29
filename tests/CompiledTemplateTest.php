@@ -384,6 +384,48 @@ final class CompiledTemplateTest extends TestCase {
 		$this->assertSame( $interpreter, $compiled );
 	}
 
+	public function testTemplateTagParity(): void {
+		$this->assertParity( '<template><p>Hello {name}</p></template>', [ 'name' => 'Ada' ] );
+		$this->assertParity( '<template />' );
+		$this->assertParity( '<template><p>First</p><p>Second</p></template>' );
+		$this->assertParity( '<template><div><template id="row-tpl"><span>Nested</span></template></div></template>' );
+		$this->assertParity( '<div>{show && <template id="js-tpl"><span>A</span><span>B</span></template>}</div>', [ 'show' => true ] );
+
+		$source = <<<'LIQX'
+---
+const title = 'Welcome';
+---
+<template>
+  <h1>{title}</h1>
+  <template id="row-tpl"><tr><td>Row</td></tr></template>
+</template>
+<style>
+  h1 { color: red; }
+</style>
+<schema>
+{ "name": "Hero" }
+</schema>
+LIQX;
+		$this->assertParity( $source, [] );
+
+		$interpreterWrapper = Template::parse( $source, Environment::create() )->render( [], wrapper: [
+			'tag'   => 'section',
+			'attrs' => [ 'id' => 'hero-1', 'class' => 'hero-sec' ],
+		] );
+		$compiledWrapper    = Template::parse( $source, $this->env )->render( [], wrapper: [
+			'tag'   => 'section',
+			'attrs' => [ 'id' => 'hero-1', 'class' => 'hero-sec' ],
+		] );
+		$this->assertSame( $interpreterWrapper, $compiledWrapper );
+
+		// Parity on non-template document with wrapper
+		$plain = '<h2>{title}</h2>';
+		$iPlain = Template::parse( $plain, Environment::create() )->render( [ 'title' => 'T' ], wrapper: [ 'tag' => 'div', 'attrs' => ' class="wrap"' ] );
+		$cPlain = Template::parse( $plain, $this->env )->render( [ 'title' => 'T' ], wrapper: [ 'tag' => 'div', 'attrs' => ' class="wrap"' ] );
+		$this->assertSame( $iPlain, $cPlain );
+	}
+
+
 	/** @param array<string, mixed> $data */
 	private function drop( array $data ): object {
 		return new class( $data ) {

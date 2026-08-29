@@ -163,21 +163,22 @@ final class Environment {
 	 * native PHP closure instead of interpreted.
 	 *
 	 * @param array<string, mixed> $data
+	 * @param array{tag?: string, attrs?: array<string, mixed>|string}|null $wrapper
 	 */
-	public function renderPartial( string $name, FileSystem $fileSystem, array $data = [], ?Context $parent = null ): string {
+	public function renderPartial( string $name, FileSystem $fileSystem, array $data = [], ?Context $parent = null, ?array $wrapper = null ): string {
 		$key = spl_object_id( $fileSystem ) . ':' . $name;
 
 		if ( null !== $this->compiledTemplateDir ) {
 			$compiled = $this->compiledTemplates[ $key ] ??= $this->compilePartial( $name, $fileSystem, $key );
 
 			return null !== $parent
-				? $compiled->renderIn( $this, $data, $parent )
-				: $compiled->render( $this, $data );
+				? $compiled->renderIn( $this, $data, $parent, false, $wrapper )
+				: $compiled->render( $this, $data, false, $wrapper );
 		}
 
 		$template  = $this->partials[ $key ] ??= Template::parse( $fileSystem->load( $name ), $this, $name );
 
-		return null !== $parent ? $template->renderIn( $data, $parent ) : $template->render( $data );
+		return null !== $parent ? $template->renderIn( $data, $parent, false, $wrapper ) : $template->render( $data, false, $wrapper );
 	}
 
 	private function compilePartial( string $name, FileSystem $fileSystem, string $key ): CompiledTemplate {

@@ -1,0 +1,27 @@
+{
+  "name": "liqx",
+  "displayName": "Liqx",
+  "version": "0.2.0",
+  "contributes": {
+    "languages": [
+      {
+        "id": "liqx",
+        "aliases": ["Liqx", "liqx"],
+        "extensions": [".liqx"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "liqx",
+        "scopeName": "text.html.liqx",
+        "path": "./liqx.tmLanguage.json",
+        "embeddedLanguages": {
+          "meta.embedded.block.js": "javascript",
+          "meta.embedded.block.css": "css",
+          "meta.embedded.block.json": "json"
+        }
+      }
+    ]
+  }
+}

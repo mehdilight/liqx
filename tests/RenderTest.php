@@ -542,4 +542,108 @@ LQX;
 		$this->assertStringContainsString( '<p>Alice has 3 items</p>', $rendered );
 		$this->assertStringContainsString( '<style>.box { color: #f00; padding: 10px; }</style>', $rendered );
 	}
+
+	public function testTemplateTagUnwrappedInOutput(): void {
+		$this->assertSame(
+			'<p>Hello Ada</p>',
+			$this->render( '<template><p>Hello {name}</p></template>', [ 'name' => 'Ada' ] )
+		);
+	}
+
+	public function testTemplateTagSelfClosing(): void {
+		$this->assertSame( '', $this->render( '<template />' ) );
+		$this->assertSame( '', $this->render( '<template/>' ) );
+	}
+
+	public function testTemplateTagFragmentWithMultipleChildren(): void {
+		$this->assertSame(
+			'<p>First</p><p>Second</p>',
+			$this->render( '<template><p>First</p><p>Second</p></template>' )
+		);
+	}
+
+	public function testInnerTemplatePreservedForClientSideJs(): void {
+		$this->assertSame(
+			'<div><template id="row-tpl"><span>Item</span></template></div>',
+			$this->render( '<template><div><template id="row-tpl"><span>Item</span></template></div></template>' )
+		);
+	}
+
+	public function testInnerTemplateInJsxPreserved(): void {
+		$this->assertSame(
+			'<div><template id="js-tpl"><span>A</span><span>B</span></template></div>',
+			$this->render( '<div>{show && <template id="js-tpl"><span>A</span><span>B</span></template>}</div>', [ 'show' => true ] )
+		);
+	}
+
+	public function testTemplateTagWithFrontmatterAndSchema(): void {
+		$source = "---\nconst title = 'Welcome';\n---\n<template><h1>{title}</h1></template>\n<schema>\n{ \"name\": \"Hero\" }\n</schema>";
+
+		$template = Template::parse( $source, $this->env );
+		$this->assertSame( "<h1>Welcome</h1>\n", $template->render() );
+		$this->assertSame( [ 'name' => 'Hero' ], $template->schema() );
+	}
+
+	public function testTemplateTagReplacedWithWrapper(): void {
+		$source = <<<'LIQX'
+---
+const title = 'Hero Title';
+---
+<template>
+  <h1>{title}</h1>
+</template>
+<style>
+  .hero { color: red; }
+</style>
+LIQX;
+
+		$template = Template::parse( $source, $this->env );
+
+		$rendered = $template->render( [], wrapper: [
+			'tag'   => 'section',
+			'attrs' => [
+				'id'    => 'lithos-section-1',
+				'class' => 'lithos-section lithos-section--hero',
+				'data-lithos-section-name' => 'Hero',
+			],
+		] );
+
+		$this->assertSame(
+			"<section id=\"lithos-section-1\" class=\"lithos-section lithos-section--hero\" data-lithos-section-name=\"Hero\">\n  <h1>Hero Title</h1>\n</section>\n<style>\n  .hero { color: red; }\n</style>",
+			$rendered
+		);
+	}
+
+	public function testTemplateTagReplacedWithRawStringAttrs(): void {
+		$source = '<template><h1>{title}</h1></template>';
+		$template = Template::parse( $source, $this->env );
+
+		$rendered = $template->render( [ 'title' => 'Title' ], wrapper: [
+			'tag'   => 'div',
+			'attrs' => ' id="sec-1" data-custom="value"',
+		] );
+
+		$this->assertSame( '<div id="sec-1" data-custom="value"><h1>Title</h1></div>', $rendered );
+	}
+
+	public function testDocumentWithoutTemplateWrappedWhenRequested(): void {
+		$source = '<h1>{title}</h1>';
+		$template = Template::parse( $source, $this->env );
+
+		$rendered = $template->render( [ 'title' => 'Title' ], wrapper: [
+			'tag'   => 'article',
+			'attrs' => [ 'class' => 'card' ],
+		] );
+
+		$this->assertSame( '<article class="card"><h1>Title</h1></article>', $rendered );
+	}
+
+	public function testWrapperNoneDoesNotWrap(): void {
+		$source = '<template><h1>{title}</h1></template>';
+		$template = Template::parse( $source, $this->env );
+
+		$rendered = $template->render( [ 'title' => 'Title' ], wrapper: [ 'tag' => 'none' ] );
+		$this->assertSame( '<h1>Title</h1>', $rendered );
+	}
 }
+

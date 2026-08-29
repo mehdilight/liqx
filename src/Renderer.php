@@ -11,6 +11,7 @@ use Phpmystic\Liqx\Node\FrontmatterDestructure;
 use Phpmystic\Liqx\Node\Output;
 use Phpmystic\Liqx\Node\Script;
 use Phpmystic\Liqx\Node\Style;
+use Phpmystic\Liqx\Node\TemplateBlock;
 use Phpmystic\Liqx\Node\Text;
 
 /**
@@ -49,15 +50,40 @@ final class Renderer {
 		$this->evaluator = new Evaluator( $this );
 	}
 
-	public function render( Document $document, Context $ctx ): string {
-		$out = '';
-
+	/**
+	 * @param array{tag?: string, attrs?: array<string, mixed>|string}|null $wrapper
+	 */
+	public function render( Document $document, Context $ctx, ?array $wrapper = null ): string {
 		$ctx->push();
 
 		$this->evaluateFrontmatter( $document, $ctx );
 
+		$hasTemplateBlock = false;
+
 		foreach ( $document->body as $node ) {
-			$out .= $this->renderNode( $node, $ctx );
+			if ( $node instanceof TemplateBlock ) {
+				$hasTemplateBlock = true;
+
+				break;
+			}
+		}
+
+		$out = '';
+
+		if ( ! $hasTemplateBlock && null !== $wrapper && ! empty( $wrapper['tag'] ) && 'none' !== $wrapper['tag'] ) {
+			$tag   = $wrapper['tag'];
+			$attrs = $this->evaluator->formatWrapperAttrs( $wrapper['attrs'] ?? null );
+			$out  .= '<' . $tag . $attrs . '>';
+
+			foreach ( $document->body as $node ) {
+				$out .= $this->renderNode( $node, $ctx, $wrapper );
+			}
+
+			$out .= '</' . $tag . '>';
+		} else {
+			foreach ( $document->body as $node ) {
+				$out .= $this->renderNode( $node, $ctx, $wrapper );
+			}
 		}
 
 		$ctx->pop();
@@ -119,7 +145,27 @@ final class Renderer {
 		return $values;
 	}
 
-	public function renderNode( Node $node, Context $ctx ): string {
+	/**
+	 * @param array{tag?: string, attrs?: array<string, mixed>|string}|null $wrapper
+	 */
+	public function renderNode( Node $node, Context $ctx, ?array $wrapper = null ): string {
+		if ( $node instanceof TemplateBlock ) {
+			$inner = '';
+
+			foreach ( $node->children as $child ) {
+				$inner .= $this->renderNode( $child, $ctx, $wrapper );
+			}
+
+			if ( null !== $wrapper && ! empty( $wrapper['tag'] ) && 'none' !== $wrapper['tag'] ) {
+				$tag   = $wrapper['tag'];
+				$attrs = $this->evaluator->formatWrapperAttrs( $wrapper['attrs'] ?? null );
+
+				return '<' . $tag . $attrs . '>' . $inner . '</' . $tag . '>';
+			}
+
+			return $inner;
+		}
+
 		if ( $node instanceof Text ) {
 			return $node->value;
 		}

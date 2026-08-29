@@ -1,0 +1,47 @@
+<idea-plugin>
+    <id>com.phpmystic.liqx</id>
+    <name>Liqx</name>
+    <vendor url="https://github.com/mehdilight/liqx">Phpmystic</vendor>
+
+    <description><![CDATA[
+        <h2>Liqx Language Support for PhpStorm &amp; IntelliJ IDEA</h2>
+        <p>Provides complete support for <code>.liqx</code> JSX-flavored Liquid templates:</p>
+        <ul>
+            <li><b>LSP Integration:</b> Real-time syntax errors and diagnostics powered by the Liqx Language Server.</li>
+            <li><b>Autocompletion:</b> Context-aware completions for filters (<code>|</code>), drop members &amp; methods (<code>.</code>), and globals (<code>{</code>).</li>
+            <li><b>Hover Documentation:</b> Instant Markdown documentation for filters, globals, and drops.</li>
+            <li><b>Syntax Highlighting:</b> TextMate grammar support for JSX, CSS <code>&lt;style&gt;</code>, JSON <code>&lt;schema&gt;</code>, and frontmatter.</li>
+            <li><b>Live Templates:</b> Quick snippets for SFC sections, blocks, loops, and partials.</li>
+        </ul>
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.lang</depends>
+    <depends>com.intellij.platform.lsp</depends>
+    <depends>org.jetbrains.plugins.textmate</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <fileType
+                name="Liqx"
+                implementationClass="com.phpmystic.liqx.LiqxFileType"
+                fieldName="INSTANCE"
+                language="Liqx"
+                extensions="liqx"/>
+
+        <platform.lsp.serverSupportProvider
+                implementation="com.phpmystic.liqx.lsp.LiqxLspServerSupportProvider"/>
+
+        <projectConfigurable
+                parentId="language"
+                instance="com.phpmystic.liqx.settings.LiqxConfigurable"
+                id="com.phpmystic.liqx.settings.LiqxConfigurable"
+                displayName="Liqx Template Engine"/>
+
+        <defaultLiveTemplatesProvider
+                implementation="com.phpmystic.liqx.templates.LiqxLiveTemplatesProvider"/>
+
+        <liveTemplateContext
+                contextId="LIQX"
+                implementation="com.phpmystic.liqx.templates.LiqxTemplateContextType"/>
+    </extensions>
+</idea-plugin>

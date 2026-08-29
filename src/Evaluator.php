@@ -785,4 +785,39 @@ final class Evaluator {
 
 		return $this->evaluate( $expr, $ctx );
 	}
+
+	/**
+	 * Formats wrapper attributes (raw string or key-value map).
+	 *
+	 * @param array<string, mixed>|string|null $attrs
+	 */
+	public function formatWrapperAttrs( array|string|null $attrs ): string {
+		if ( null === $attrs || '' === $attrs || [] === $attrs ) {
+			return '';
+		}
+
+		if ( is_string( $attrs ) ) {
+			$trimmed = trim( $attrs );
+
+			return '' === $trimmed ? '' : ' ' . $trimmed;
+		}
+
+		$out = '';
+
+		foreach ( $attrs as $name => $value ) {
+			if ( null === $value || false === $value ) {
+				continue;
+			}
+
+			if ( true === $value ) {
+				$out .= ' ' . $name;
+
+				continue;
+			}
+
+			$out .= ' ' . $name . '="' . $this->stringify( $value ) . '"';
+		}
+
+		return $out;
+	}
 }
