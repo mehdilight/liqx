@@ -43,5 +43,8 @@
         <liveTemplateContext
                 contextId="LIQX"
                 implementation="com.phpmystic.liqx.templates.LiqxTemplateContextType"/>
+
+        <typedHandler
+                implementation="com.phpmystic.liqx.editor.LiqxTypedHandler"/>
     </extensions>
 </idea-plugin>
