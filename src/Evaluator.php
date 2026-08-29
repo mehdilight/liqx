@@ -405,6 +405,35 @@ final class Evaluator {
 	// ---------------------------------------------------------------------
 
 	/**
+	 * `map` whose result goes straight to output: project and concatenate in one
+	 * pass instead of materialising the projected array for
+	 * {@see Renderer::renderValue()} to walk again.
+	 *
+	 * Only valid where the intermediate array is never observed, which the
+	 * compiler decides. Every receiver shape `methodCall` accepts is routed
+	 * through the same code it would have taken, so error messages and the
+	 * absent-receiver rule (`null` maps to nothing) are unchanged.
+	 */
+	public function mapJoin( mixed $object, mixed $callback, Context $ctx ): string {
+		if ( is_array( $object ) && $callback instanceof \Closure ) {
+			$out   = '';
+			$index = 0;
+
+			foreach ( $object as $element ) {
+				$value = $callback( $element, $index++, $object );
+
+				// A rendered element is already a string; anything else takes the
+				// shared value rules.
+				$out .= is_string( $value ) ? $value : $this->renderValue( $value, $ctx );
+			}
+
+			return $out;
+		}
+
+		return $this->renderValue( $this->methodCall( $object, 'map', [ $callback ], $ctx ), $ctx );
+	}
+
+	/**
 	 * @param list<mixed> $args
 	 */
 	public function methodCall( mixed $object, string $method, array $args, Context $ctx ): mixed {

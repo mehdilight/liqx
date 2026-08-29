@@ -51,6 +51,33 @@ final class CompiledTemplateTest extends TestCase {
 		$this->assertSame( $interpreter, $compiled, 'compiled output diverged from the interpreter for: ' . $source );
 	}
 
+	/**
+	 * Parity for a source that is expected to fail: both paths must raise the
+	 * same exception class with the same message. Unlike {@see assertParity()}
+	 * this tolerates a throw, so it is only for cases asserted to throw.
+	 *
+	 * @param array<string, mixed> $data
+	 */
+	private function assertFailureParity( string $source, array $data = [], bool $strict = false ): void {
+		$interpreter = null;
+		$compiled    = null;
+
+		try {
+			Template::parse( $source, Environment::create() )->render( $data, strict: $strict );
+		} catch ( \Throwable $e ) {
+			$interpreter = $e::class . ': ' . $e->getMessage();
+		}
+
+		try {
+			$this->render( $source, $data, $strict );
+		} catch ( \Throwable $e ) {
+			$compiled = $e::class . ': ' . $e->getMessage();
+		}
+
+		$this->assertNotNull( $interpreter, 'expected the interpreter to fail for: ' . $source );
+		$this->assertSame( $interpreter, $compiled, 'compiled failure diverged from the interpreter for: ' . $source );
+	}
+
 	/** The generated PHP for a source — for asserting on the emitted shape. */
 	private function compile( string $source ): string {
 		return ( new Compiler() )->compile( ( new \Phpmystic\Liqx\Parser() )->parse( $source ) );
@@ -545,7 +572,7 @@ final class CompiledTemplateTest extends TestCase {
 		$php = $this->compile( '<div class="products">{items.map(i => <span>{i.name}</span>)}</div>' );
 
 		$this->assertSame( 1, substr_count( $php, "'products'" ), 'the body was emitted more than once' );
-		$this->assertSame( 1, substr_count( $php, "'map'" ), 'the body was emitted more than once' );
+		$this->assertSame( 1, substr_count( $php, 'mapJoin' ), 'the body was emitted more than once' );
 
 		// The wrapper tag itself is still conditional.
 		$this->assertStringContainsString( 'formatWrapperAttrs', $php );
@@ -596,6 +623,71 @@ final class CompiledTemplateTest extends TestCase {
 	 * nested `section()` renders that inherit the parent scope. So the emitted
 	 * code writes both and reads the local.
 	 */
+	/**
+	 * `{items.map(i => <li>…</li>)}` in output position builds an intermediate
+	 * array of 50 rendered strings only for `renderValue()` to walk it again and
+	 * concatenate. In output position the array is never observed, so the
+	 * mapping and the joining collapse into one pass.
+	 */
+	public function testMapInOutputPositionCompilesToASingleJoiningPass(): void {
+		$php = $this->compile( '<ul>{items.map(i => <li>{i.name}</li>)}</ul>' );
+
+		$this->assertStringContainsString( '$eval->mapJoin(', $php, 'map in output position still builds an intermediate array' );
+		$this->assertStringNotContainsString( "methodCall( ( ( \$ctx->strict", $php );
+
+		// Only output position may collapse: a mapped value that is consumed as a
+		// value (chained, filtered, bound to a const) must stay a real array.
+		$this->assertStringContainsString( "'map'", $this->compile( '<p>{items.map(i => i.name).length}</p>' ) );
+		$this->assertStringContainsString( "'map'", $this->compile( '<p>{items.map(i => i.name) | join}</p>' ) );
+		$this->assertStringContainsString( "'map'", $this->compile( "---\nconst names = items.map(i => i.name);\n---\n<p>{names.length}</p>" ) );
+
+		// Other array methods keep the helper — only map is a pure projection
+		// whose result is concatenated.
+		$this->assertStringNotContainsString( 'mapJoin', $this->compile( '<ul>{items.filter(i => i.ok)}</ul>' ) );
+	}
+
+	/**
+	 * The joining pass may only apply where it is observationally identical, so
+	 * it has to agree with the interpreter for every receiver shape `methodCall`
+	 * accepts — including the ones that are not plain lists.
+	 */
+	public function testMapJoinMatchesInterpreterForEveryReceiverShape(): void {
+		$source = '<ul>{items.map(i => <li>{i.name}</li>)}</ul>';
+
+		// Plain list, empty list, absent receiver (Liquid renders nothing).
+		$this->assertParity( $source, [ 'items' => [ [ 'name' => 'a' ], [ 'name' => 'b' ] ] ] );
+		$this->assertParity( $source, [ 'items' => [] ] );
+		$this->assertParity( $source, [] );
+		$this->assertParity( $source, [ 'items' => null ] );
+
+		// String keys: `map` discards keys, so the joined output is the same.
+		$this->assertParity( $source, [ 'items' => [ 'x' => [ 'name' => 'a' ], 'y' => [ 'name' => 'b' ] ] ] );
+
+		// A lazy host collection (Traversable) is mapped like the array it
+		// stands in for.
+		$this->assertParity( $source, [ 'items' => new \ArrayIterator( [ [ 'name' => 'a' ], [ 'name' => 'b' ] ] ) ] );
+
+		// Non-mappable receivers must still raise the same error.
+		foreach ( [ 'a string', new \stdClass(), 7 ] as $value ) {
+			$this->assertFailureParity( $source, [ 'items' => $value ] );
+		}
+
+		// The callback's index and third (whole-collection) argument survive.
+		$this->assertParity( '<ul>{items.map((i, k) => <li>{`${k}:${i.name}`}</li>)}</ul>', [ 'items' => [ [ 'name' => 'a' ], [ 'name' => 'b' ] ] ] );
+
+		// A callback returning a non-string still goes through the value rules.
+		foreach ( [ null, false, true, 0, '', [ 1, 2 ] ] as $returned ) {
+			$this->assertParity( '<ul>{items.map(i => i.v)}</ul>', [ 'items' => [ [ 'v' => $returned ], [ 'v' => 'tail' ] ] ] );
+		}
+
+		// Nested maps, and a map whose callback is a block body.
+		$this->assertParity( '<div>{items.map(i => i.subs.map(s => <b>{s}</b>))}</div>', [ 'items' => [ [ 'subs' => [ 'x', 'y' ] ], [ 'subs' => [] ] ] ] );
+		$this->assertParity( '<div>{items.map(i => { const d = i.n * 2; return <b>{d}</b>; })}</div>', [ 'items' => [ [ 'n' => 1 ], [ 'n' => 2 ] ] ] );
+
+		// A callback that throws must surface the same error, not a partial join.
+		$this->assertFailureParity( '<ul>{items.map(i => <li>{i.n | unknown_filter}</li>)}</ul>', [ 'items' => [ [ 'n' => 1 ] ] ] );
+	}
+
 	public function testFrontmatterConstsReadFromLocalsButStayVisibleByName(): void {
 		$php = $this->compile( "---\nconst layout = settings.layout;\n---\n<div class={layout}>{layout}</div>" );
 

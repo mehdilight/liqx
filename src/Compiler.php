@@ -719,9 +719,46 @@ final class Compiler {
 	 * is dead work.
 	 */
 	private function outputValue( Expr $expression, bool $lenient = false ): string {
+		// `{items.map(fn)}` builds an array of rendered strings that only
+		// `renderValue()` ever sees. In output position the array is
+		// unobservable, so the projection and the concatenation fuse.
+		$joined = $this->mapJoin( $expression, $lenient );
+
+		if ( null !== $joined ) {
+			return $joined;
+		}
+
 		$compiled = $this->expr( $expression, $lenient );
 
 		return $this->yieldsString( $expression ) ? $compiled : $this->renderValue( $compiled );
+	}
+
+	/**
+	 * The single-pass form of a `map` call, or null when this expression is not
+	 * one. Restricted to a one-argument `<expr>.map( <callback> )`: extra
+	 * arguments are not part of the mapping contract, and a zero-argument call
+	 * must keep the helper so it raises the same error.
+	 */
+	private function mapJoin( Expr $expression, bool $lenient ): ?string {
+		if ( ! $expression instanceof Call ) {
+			return null;
+		}
+
+		$callee = $expression->callee;
+
+		if ( ! $callee instanceof Member || $callee->computed || 'map' !== (string) $callee->access ) {
+			return null;
+		}
+
+		if ( 1 !== count( $expression->args ) ) {
+			return null;
+		}
+
+		return '( $eval->mapJoin( '
+			. $this->expr( $callee->object, $lenient )
+			. ', '
+			. $this->expr( $expression->args[0], $lenient )
+			. ', $ctx ) )';
 	}
 
 	/**
