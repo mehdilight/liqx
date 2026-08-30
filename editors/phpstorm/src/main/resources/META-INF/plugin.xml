@@ -52,5 +52,8 @@
 
         <backspaceHandlerDelegate
                 implementation="com.phpmystic.liqx.editor.LiqxBackspaceHandler"/>
+
+        <gotoDeclarationHandler
+                implementation="com.phpmystic.liqx.navigation.LiqxGotoDeclarationHandler"/>
     </extensions>
 </idea-plugin>
