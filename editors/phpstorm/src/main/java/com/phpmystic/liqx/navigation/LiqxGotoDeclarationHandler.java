@@ -4,12 +4,17 @@ import com.intellij.codeInsight.navigation.actions.GotoDeclarationHandler;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
+import com.intellij.openapi.fileEditor.OpenFileDescriptor;
+import com.intellij.openapi.util.TextRange;
+import com.intellij.pom.Navigatable;
 import com.intellij.psi.PsiElement;
 import com.intellij.psi.PsiFile;
 import com.intellij.psi.PsiManager;
+import com.intellij.psi.impl.FakePsiElement;
 import com.intellij.psi.search.FileTypeIndex;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.phpmystic.liqx.LiqxFileType;
+import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -121,8 +126,7 @@ public final class LiqxGotoDeclarationHandler implements GotoDeclarationHandler 
             String tName = matcher.group(1);
             if (tName.equalsIgnoreCase(name)) {
                 int targetOffset = matcher.start(1);
-                PsiElement elem = file.findElementAt(targetOffset);
-                return elem != null ? elem : file;
+                return new LocalTemplateElement(file, name, targetOffset);
             }
         }
         return null;
@@ -130,5 +134,71 @@ public final class LiqxGotoDeclarationHandler implements GotoDeclarationHandler 
 
     private static String pascalToKebab(String str) {
         return str.replaceAll("([a-z0-9])([A-Z])", "$1-$2").toLowerCase();
+    }
+
+    public static final class LocalTemplateElement extends FakePsiElement implements Navigatable {
+        private final PsiFile file;
+        private final String name;
+        private final int offset;
+
+        public LocalTemplateElement(PsiFile file, String name, int offset) {
+            this.file = file;
+            this.name = name;
+            this.offset = offset;
+        }
+
+        @Override
+        public PsiElement getParent() {
+            return file;
+        }
+
+        @Override
+        public PsiFile getContainingFile() {
+            return file;
+        }
+
+        @Override
+        public int getTextOffset() {
+            return offset;
+        }
+
+        @Override
+        public TextRange getTextRange() {
+            return new TextRange(offset, offset + name.length());
+        }
+
+        @Override
+        public String getName() {
+            return name;
+        }
+
+        @Override
+        public boolean isValid() {
+            return file.isValid();
+        }
+
+        @Override
+        public boolean canNavigate() {
+            return true;
+        }
+
+        @Override
+        public boolean canNavigateToSource() {
+            return true;
+        }
+
+        @Override
+        public void navigate(boolean requestFocus) {
+            VirtualFile vf = file.getVirtualFile();
+            if (vf != null) {
+                new OpenFileDescriptor(getProject(), vf, offset).navigate(requestFocus);
+            }
+        }
+
+        @NotNull
+        @Override
+        public Project getProject() {
+            return file.getProject();
+        }
     }
 }
