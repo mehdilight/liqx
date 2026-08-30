@@ -1,6 +1,7 @@
 package com.phpmystic.liqx.navigation;
 
 import com.intellij.codeInsight.navigation.actions.GotoDeclarationHandler;
+import com.intellij.navigation.ItemPresentation;
 import com.intellij.openapi.editor.Editor;
 import com.intellij.openapi.project.Project;
 import com.intellij.openapi.vfs.VirtualFile;
@@ -14,9 +15,11 @@ import com.intellij.psi.impl.FakePsiElement;
 import com.intellij.psi.search.FileTypeIndex;
 import com.intellij.psi.search.GlobalSearchScope;
 import com.phpmystic.liqx.LiqxFileType;
+import com.phpmystic.liqx.LiqxIcons;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import javax.swing.Icon;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -43,10 +46,14 @@ public final class LiqxGotoDeclarationHandler implements GotoDeclarationHandler 
             return null;
         }
 
-        // Get the word under cursor
         CharSequence chars = editor.getDocument().getCharsSequence();
         String identifier = getIdentifierAtOffset(chars, offset);
         if (identifier == null || identifier.isBlank()) {
+            return null;
+        }
+
+        // Only trigger navigation on actual component/snippet tags or PascalCase component names
+        if (!isComponentOrSnippetTarget(chars, offset, identifier)) {
             return null;
         }
 
@@ -69,6 +76,10 @@ public final class LiqxGotoDeclarationHandler implements GotoDeclarationHandler 
         Collection<VirtualFile> liqxFiles = FileTypeIndex.getFiles(LiqxFileType.INSTANCE, GlobalSearchScope.projectScope(project));
 
         for (VirtualFile vf : liqxFiles) {
+            // Avoid navigating to self
+            if (vf.equals(file.getVirtualFile()) && localTemplate != null) {
+                continue;
+            }
             String nameWithoutExt = vf.getNameWithoutExtension();
             if (nameWithoutExt.equalsIgnoreCase(kebab) || nameWithoutExt.equalsIgnoreCase(identifier)) {
                 PsiFile targetPsi = PsiManager.getInstance(project).findFile(vf);
@@ -79,6 +90,40 @@ public final class LiqxGotoDeclarationHandler implements GotoDeclarationHandler 
         }
 
         return targets.isEmpty() ? null : targets.toArray(new PsiElement[0]);
+    }
+
+    private static boolean isComponentOrSnippetTarget(CharSequence chars, int offset, String identifier) {
+        if (identifier == null || identifier.length() < 2) {
+            return false;
+        }
+
+        // 1. PascalCase identifier (e.g. ProductHeader, ProductCard, StarRating)
+        boolean isPascalCase = Character.isUpperCase(identifier.charAt(0)) &&
+                               identifier.chars().anyMatch(Character::isLowerCase);
+
+        if (isPascalCase) {
+            return true;
+        }
+
+        // 2. Element tag position (preceded by '<' or '</')
+        int start = offset;
+        while (start > 0 && isIdentChar(chars.charAt(start - 1))) {
+            start--;
+        }
+
+        int pre = start - 1;
+        while (pre >= 0 && (chars.charAt(pre) == ' ' || chars.charAt(pre) == '\t')) {
+            pre--;
+        }
+
+        if (pre >= 0 && chars.charAt(pre) == '<') {
+            return true;
+        }
+        if (pre >= 1 && chars.charAt(pre) == '/' && chars.charAt(pre - 1) == '<') {
+            return true;
+        }
+
+        return false;
     }
 
     private static @Nullable String getIdentifierAtOffset(CharSequence chars, int offset) {
@@ -116,7 +161,11 @@ public final class LiqxGotoDeclarationHandler implements GotoDeclarationHandler 
                lower.equals("img") || lower.equals("svg") || lower.equals("path") ||
                lower.equals("label") || lower.equals("select") || lower.equals("option") ||
                lower.equals("textarea") || lower.equals("nav") || lower.equals("header") ||
-               lower.equals("footer") || lower.equals("section") || lower.equals("article");
+               lower.equals("footer") || lower.equals("section") || lower.equals("article") ||
+               lower.equals("main") || lower.equals("aside") || lower.equals("i") ||
+               lower.equals("b") || lower.equals("strong") || lower.equals("em") ||
+               lower.equals("s") || lower.equals("small") || lower.equals("table") ||
+               lower.equals("tr") || lower.equals("td") || lower.equals("th");
     }
 
     private static @Nullable PsiElement findLocalNamedTemplate(PsiFile file, String name) {
@@ -136,7 +185,7 @@ public final class LiqxGotoDeclarationHandler implements GotoDeclarationHandler 
         return str.replaceAll("([a-z0-9])([A-Z])", "$1-$2").toLowerCase();
     }
 
-    public static final class LocalTemplateElement extends FakePsiElement implements Navigatable {
+    public static final class LocalTemplateElement extends FakePsiElement implements Navigatable, ItemPresentation {
         private final PsiFile file;
         private final String name;
         private final int offset;
@@ -145,6 +194,26 @@ public final class LiqxGotoDeclarationHandler implements GotoDeclarationHandler 
             this.file = file;
             this.name = name;
             this.offset = offset;
+        }
+
+        @Override
+        public ItemPresentation getPresentation() {
+            return this;
+        }
+
+        @Override
+        public String getPresentableText() {
+            return "<template name=\"" + name + "\">";
+        }
+
+        @Override
+        public String getLocationString() {
+            return file.getName();
+        }
+
+        @Override
+        public Icon getIcon(boolean unused) {
+            return LiqxIcons.FILE;
         }
 
         @Override
