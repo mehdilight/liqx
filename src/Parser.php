@@ -43,6 +43,8 @@ use Phpmystic\Liqx\Node\TemplateBlock;
 		$style  = null;
 		$schema = null;
 
+		$namedTemplates = [];
+
 		while ( ! $this->stream->eof() ) {
 			$node = $this->expr->parseBodyNode();
 
@@ -59,6 +61,18 @@ use Phpmystic\Liqx\Node\TemplateBlock;
 			}
 
 			if ( $node instanceof Element && 'template' === strtolower( $node->tag ) ) {
+				$templateName = null;
+				foreach ( $node->attrs as $attr ) {
+					if ( 'name' === $attr['name'] && null !== $attr['value'] ) {
+						if ( $attr['value'] instanceof Expr\Literal && is_string( $attr['value']->value ) ) {
+							$templateName = $attr['value']->value;
+						} elseif ( $attr['value'] instanceof Expr\Identifier ) {
+							$templateName = $attr['value']->name;
+						}
+						break;
+					}
+				}
+
 				$templateChildren = [];
 
 				foreach ( $node->children as $child ) {
@@ -75,7 +89,13 @@ use Phpmystic\Liqx\Node\TemplateBlock;
 					$templateChildren[] = $child;
 				}
 
-				$body[] = new TemplateBlock( $templateChildren, $node->attrs, $node->line );
+				$block = new TemplateBlock( $templateChildren, $node->attrs, $node->line );
+
+				if ( null !== $templateName ) {
+					$namedTemplates[ $templateName ] = $block;
+				} else {
+					$body[] = $block;
+				}
 
 				continue;
 			}
@@ -85,7 +105,7 @@ use Phpmystic\Liqx\Node\TemplateBlock;
 			}
 		}
 
-		return new Document( $frontmatter, $body, $style, $schema, $this->frontmatterReturn );
+		return new Document( $frontmatter, $body, $style, $schema, $this->frontmatterReturn, $namedTemplates );
 	}
 
 	/** @return list<object> */

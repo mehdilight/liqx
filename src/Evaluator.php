@@ -1027,6 +1027,26 @@ final class Evaluator {
 	 * @param array<string, mixed> $props
 	 */
 	public function renderComponent( Context $ctx, string $tag, array $props ): string {
+		$namedTemplates = $ctx->get( '__named_templates__' );
+		if ( is_array( $namedTemplates ) ) {
+			foreach ( $namedTemplates as $tName => $tBlock ) {
+				if ( 0 === strcasecmp( $tName, $tag ) && $tBlock instanceof \Phpmystic\Liqx\Node\TemplateBlock ) {
+					$ctx->push( $props );
+					$ctx->set( 'props', $props );
+					try {
+						$out = '';
+						foreach ( $tBlock->children as $child ) {
+							$out .= $this->renderer->renderNode( $child, $ctx );
+						}
+
+						return $out;
+					} finally {
+						$ctx->pop();
+					}
+				}
+			}
+		}
+
 		return $ctx->environment->renderSnippet( $tag, $props );
 	}
 

@@ -177,12 +177,16 @@ final class Compiler {
 		return null;
 	}
 
+	/** @var array<string, TemplateBlock> */
+	private array $namedTemplates = [];
+
 	private function bindLocal( string $name, string $var ): void {
 		$this->scopeStack[ count( $this->scopeStack ) - 1 ][ $name ] = $var;
 	}
 
 	public function compile( Document $document ): string {
-		$this->staticConsts = [];
+		$this->staticConsts   = [];
+		$this->namedTemplates = $document->namedTemplates;
 
 		// The document's own scope: frontmatter consts bind here, so nested
 		// closures capture them via `use` like any other enclosing local.
@@ -200,6 +204,24 @@ final class Compiler {
 		$lines[] = "    \$out = '';";
 		$lines[] = '    $ctx->push();';
 		$lines[] = '    try {';
+
+		foreach ( $document->namedTemplates as $tName => $tBlock ) {
+			$subFnVar = '$__sub_tpl_' . preg_replace( '/[^A-Za-z0-9_]/', '_', $tName );
+			$lines[]  = '        ' . $subFnVar . ' = static function ( array $props, \\Phpmystic\\Liqx\\Context $ctx, \\Phpmystic\\Liqx\\Evaluator $eval ): string {';
+			$lines[]  = "            \$out = '';";
+			$lines[]  = '            $ctx->push( $props );';
+			$lines[]  = '            $ctx->set( \'props\', $props );';
+			$lines[]  = '            try {';
+			foreach ( $this->nodeStatements( $tBlock->children, '                ' ) as $stmt ) {
+				$lines[] = $stmt;
+			}
+			$lines[]  = '            } finally {';
+			$lines[]  = '                $ctx->pop();';
+			$lines[]  = '            }';
+			$lines[]  = '';
+			$lines[]  = '            return $out;';
+			$lines[]  = '        };';
+		}
 
 		foreach ( $document->frontmatter as $declaration ) {
 			if ( null !== $document->frontmatterReturn && $declaration instanceof FrontmatterReturn && $declaration->expr === $document->frontmatterReturn ) {
@@ -1082,6 +1104,14 @@ final class Compiler {
 				$propsCode = '$eval->mergeProps( ' . $propsCode . ', ' . $chunk . ' )';
 			}
 			$finalPropsCode = '$eval->mergeProps( ' . $propsCode . ', ' . $slotAndChildrenChunk . ' )';
+		}
+
+		foreach ( $this->namedTemplates as $tName => $tBlock ) {
+			if ( 0 === strcasecmp( $tName, $element->tag ) ) {
+				$subFnVar = '$__sub_tpl_' . preg_replace( '/[^A-Za-z0-9_]/', '_', $tName );
+
+				return '( ' . $subFnVar . '( ' . $finalPropsCode . ', $ctx, $eval ) )';
+			}
 		}
 
 		return '( $eval->renderComponent( $ctx, ' . var_export( $element->tag, true ) . ', ' . $finalPropsCode . ' ) )';

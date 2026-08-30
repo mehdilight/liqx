@@ -56,6 +56,10 @@ final class Renderer {
 	public function render( Document $document, Context $ctx, ?array $wrapper = null ): string {
 		$ctx->push();
 
+		if ( [] !== $document->namedTemplates ) {
+			$ctx->set( '__named_templates__', $document->namedTemplates );
+		}
+
 		$this->evaluateFrontmatter( $document, $ctx );
 
 		if ( $ctx->get( '__early_return__' ) ) {
@@ -461,6 +465,26 @@ final class Renderer {
 
 		$props['children'] = $element->selfClosing ? null : $defaultChildren;
 		$props['slots']    = $slots;
+
+		$namedTemplates = $ctx->get( '__named_templates__' );
+		if ( is_array( $namedTemplates ) ) {
+			foreach ( $namedTemplates as $tName => $tBlock ) {
+				if ( 0 === strcasecmp( $tName, $element->tag ) && $tBlock instanceof TemplateBlock ) {
+					$ctx->push( $props );
+					$ctx->set( 'props', $props );
+					try {
+						$out = '';
+						foreach ( $tBlock->children as $child ) {
+							$out .= $this->renderNode( $child, $ctx );
+						}
+
+						return $out;
+					} finally {
+						$ctx->pop();
+					}
+				}
+			}
+		}
 
 		return $ctx->environment->renderSnippet( $element->tag, $props );
 	}

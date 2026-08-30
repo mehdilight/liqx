@@ -21,15 +21,27 @@ final class Document implements Node {
 
 	public readonly ?Schema $schema;
 
+	/** @var array<string, TemplateBlock> */
+	public readonly array $namedTemplates;
+
 	/**
-	 * @param list<Frontmatter|FrontmatterDestructure> $frontmatter
+	 * @param list<object> $frontmatter
 	 * @param list<Node> $body
+	 * @param array<string, TemplateBlock> $namedTemplates
 	 */
-	public function __construct( array $frontmatter, array $body, ?Style $style, ?Schema $schema, ?Expr $frontmatterReturn = null ) {
-		$this->frontmatter      = $frontmatter;
+	public function __construct(
+		array $frontmatter,
+		array $body,
+		?Style $style = null,
+		?Schema $schema = null,
+		?Expr $frontmatterReturn = null,
+		array $namedTemplates = [],
+	) {
+		$this->frontmatter       = $frontmatter;
 		$this->frontmatterReturn = $frontmatterReturn;
-		$this->body             = $body;
-		$this->style            = $style;
-		$this->schema           = $schema;
+		$this->body              = $body;
+		$this->style             = $style;
+		$this->schema            = $schema;
+		$this->namedTemplates    = $namedTemplates;
 	}
 }
