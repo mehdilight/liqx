@@ -20,18 +20,21 @@ use Phpmystic\Liqx\Expr\TemplateString;
 use Phpmystic\Liqx\Expr\Unary;
 use Phpmystic\Liqx\Node\Element;
 use Phpmystic\Liqx\Node\Frontmatter;
+use Phpmystic\Liqx\Node\FrontmatterAssignment;
 use Phpmystic\Liqx\Node\FrontmatterDestructure;
+use Phpmystic\Liqx\Node\FrontmatterFunction;
+use Phpmystic\Liqx\Node\FrontmatterIf;
+use Phpmystic\Liqx\Node\FrontmatterReturn;
+use Phpmystic\Liqx\Node\FrontmatterSwitch;
 
 /**
  * Enforces PRD §5: the frontmatter block is a restricted, sandboxed subset of
  * JS — data plus restricted logic, not a script. The grammar already rules
- * out loops, `function`, `new`, assignment, and class/import; this pass
- * rejects the remaining escape hatches explicitly and with a clear error:
+ * out loops, `new`, and class/import; this pass
+ * rejects dangerous escape hatches explicitly and with a clear error:
  *
  *   - dangerous globals / callables (eval, Function, window, process, …);
  *   - `constructor` / `__proto__` / `prototype` property access;
- *   - arrow functions not used as a `.map()` / `.filter()` / `.find()` /
- *     `.some()` / `.every()` callback (no arbitrary function definitions);
  *   - JSX elements (markup belongs in the render body).
  *
  * Runs at parse time, so a bad `.liqx` file fails before it ever compiles.
@@ -59,26 +62,107 @@ final class SandboxValidator {
 		'split', 'startsWith', 'endsWith',
 	];
 
-	public function validateDeclaration( Frontmatter|FrontmatterDestructure $declaration ): void {
-		$line = $declaration->line;
+	public function validateDeclaration( object $declaration ): void {
+		$this->validateStatement( $declaration );
+	}
 
-		if ( $declaration instanceof Frontmatter ) {
-			$this->rejectReservedName( $declaration->name, $line );
-
-			$this->validateExpr( $declaration->expr, arrowsAllowed: false, line: $line );
+	public function validateStatement( object $stmt ): void {
+		if ( $stmt instanceof Frontmatter ) {
+			$this->rejectReservedName( $stmt->name, $stmt->line );
+			$this->validateExpr( $stmt->expr, arrowsAllowed: true, line: $stmt->line );
 
 			return;
 		}
 
-		foreach ( $declaration->bindings as $binding ) {
-			$this->rejectReservedName( $binding['name'], $line );
+		if ( $stmt instanceof FrontmatterDestructure ) {
+			foreach ( $stmt->bindings as $binding ) {
+				$this->rejectReservedName( $binding['name'], $stmt->line );
 
-			if ( null !== $binding['default'] ) {
-				$this->validateExpr( $binding['default'], arrowsAllowed: false, line: $line );
+				if ( null !== $binding['default'] ) {
+					$this->validateExpr( $binding['default'], arrowsAllowed: true, line: $stmt->line );
+				}
 			}
+
+			$this->validateExpr( $stmt->init, arrowsAllowed: true, line: $stmt->line );
+
+			return;
 		}
 
-		$this->validateExpr( $declaration->init, arrowsAllowed: false, line: $line );
+		if ( $stmt instanceof FrontmatterAssignment ) {
+			$this->rejectReservedName( $stmt->name, $stmt->line );
+			$this->validateExpr( $stmt->expr, arrowsAllowed: true, line: $stmt->line );
+
+			return;
+		}
+
+		if ( $stmt instanceof FrontmatterIf ) {
+			$this->validateExpr( $stmt->test, arrowsAllowed: true, line: $stmt->line );
+
+			foreach ( $stmt->then as $inner ) {
+				$this->validateStatement( $inner );
+			}
+
+			foreach ( $stmt->elseIfs as $elseIf ) {
+				$this->validateExpr( $elseIf['test'], arrowsAllowed: true, line: $stmt->line );
+				foreach ( $elseIf['body'] as $inner ) {
+					$this->validateStatement( $inner );
+				}
+			}
+
+			foreach ( $stmt->else as $inner ) {
+				$this->validateStatement( $inner );
+			}
+
+			return;
+		}
+
+		if ( $stmt instanceof FrontmatterSwitch ) {
+			$this->validateExpr( $stmt->discriminant, arrowsAllowed: true, line: $stmt->line );
+
+			foreach ( $stmt->cases as $case ) {
+				if ( null !== $case['test'] ) {
+					$this->validateExpr( $case['test'], arrowsAllowed: true, line: $stmt->line );
+				}
+				foreach ( $case['body'] as $inner ) {
+					$this->validateStatement( $inner );
+				}
+			}
+
+			return;
+		}
+
+		if ( $stmt instanceof FrontmatterFunction ) {
+			$this->rejectReservedName( $stmt->name, $stmt->line );
+
+			foreach ( $stmt->params as $param ) {
+				$this->rejectReservedName( $param['name'], $stmt->line );
+				if ( null !== $param['default'] ) {
+					$this->validateExpr( $param['default'], arrowsAllowed: true, line: $stmt->line );
+				}
+			}
+
+			foreach ( $stmt->body as $inner ) {
+				$this->validateStatement( $inner );
+			}
+
+			if ( null !== $stmt->return ) {
+				$this->validateExpr( $stmt->return, arrowsAllowed: true, line: $stmt->line );
+			}
+
+			return;
+		}
+
+		if ( $stmt instanceof FrontmatterReturn ) {
+			if ( null !== $stmt->expr ) {
+				$this->validateExpr( $stmt->expr, arrowsAllowed: true, line: $stmt->line );
+			}
+
+			return;
+		}
+
+		if ( $stmt instanceof Expr ) {
+			$this->validateExpr( $stmt, arrowsAllowed: true, line: 0 );
+		}
 	}
 
 	private function rejectReservedName( string $name, int $line ): void {
@@ -93,7 +177,7 @@ final class SandboxValidator {
 	 * must not smuggle markup (JSX) or arbitrary functions into the props.
 	 */
 	public function validateExported( Expr $expr, int $line ): void {
-		$this->validateExpr( $expr, arrowsAllowed: false, line: $line );
+		$this->validateExpr( $expr, arrowsAllowed: true, line: $line );
 	}
 
 	private function validateExpr( Expr $expr, bool $arrowsAllowed, int $line ): void {
@@ -143,18 +227,14 @@ final class SandboxValidator {
 			$this->validateExpr( $expr->callee, $arrowsAllowed, $line );
 
 			foreach ( $expr->args as $arg ) {
-				$this->validateExpr( $arg, $isCollectionCallback, $line );
+				$this->validateExpr( $arg, true, $line );
 			}
 
 			return;
 		}
 
 		if ( $expr instanceof ArrowFunction ) {
-			if ( ! $arrowsAllowed ) {
-				throw new SyntaxException( 'Arrow functions are only allowed as .map()/.filter()/.find() callbacks in frontmatter', $line );
-			}
-
-			$this->validateExpr( $expr->body, arrowsAllowed: false, line: $line );
+			$this->validateExpr( $expr->body, arrowsAllowed: true, line: $line );
 
 			return;
 		}

@@ -88,7 +88,7 @@ use Phpmystic\Liqx\Node\TemplateBlock;
 		return new Document( $frontmatter, $body, $style, $schema, $this->frontmatterReturn );
 	}
 
-	/** @return list<Frontmatter|FrontmatterDestructure> */
+	/** @return list<object> */
 	private function parseFrontmatter(): array {
 		if ( null === $this->stream->accept( TokenType::FrontmatterStart ) ) {
 			return [];
@@ -101,6 +101,13 @@ use Phpmystic\Liqx\Node\TemplateBlock;
 
 			if ( null !== $keyword && TokenType::Keyword === $keyword->type && 'return' === $keyword->value ) {
 				$this->stream->next();
+
+				$tokenAfterReturn = $this->stream->current();
+				if ( null === $tokenAfterReturn || TokenType::Semicolon === $tokenAfterReturn->type ) {
+					$this->stream->accept( TokenType::Semicolon );
+					$declarations[] = new Node\FrontmatterReturn( null, $keyword->line );
+					continue;
+				}
 
 				$return = $this->expr->parse();
 				$this->sandbox->validateExported( $return, $keyword->line );
@@ -118,9 +125,9 @@ use Phpmystic\Liqx\Node\TemplateBlock;
 				break;
 			}
 
-			$declaration = $this->expr->parseDeclaration();
-			$this->sandbox->validateDeclaration( $declaration );
-			$declarations[] = $declaration;
+			$stmt = $this->expr->parseFrontmatterStatement();
+			$this->sandbox->validateStatement( $stmt );
+			$declarations[] = $stmt;
 		}
 
 		return $declarations;

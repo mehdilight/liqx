@@ -58,6 +58,12 @@ final class Renderer {
 
 		$this->evaluateFrontmatter( $document, $ctx );
 
+		if ( $ctx->get( '__early_return__' ) ) {
+			$ctx->pop();
+
+			return '';
+		}
+
 		$hasTemplateBlock = false;
 
 		foreach ( $document->body as $node ) {
@@ -102,12 +108,12 @@ final class Renderer {
 	public function evaluateFrontmatter( Document $document, Context $ctx ): array {
 		$values = [];
 
-		foreach ( $document->frontmatter as $declaration ) {
+		foreach ( $document->frontmatter as $stmt ) {
 			try {
-				if ( $declaration instanceof FrontmatterDestructure ) {
-					$value = $this->evaluator->evaluate( $declaration->init, $ctx );
+				if ( $stmt instanceof Node\FrontmatterDestructure ) {
+					$value = $this->evaluator->evaluate( $stmt->init, $ctx );
 
-					foreach ( $declaration->bindings as $binding ) {
+					foreach ( $stmt->bindings as $binding ) {
 						[ 'found' => $found, 'value' => $resolved ] = $this->evaluator->lookupProperty( $value, $binding['name'] );
 
 						if ( $found ) {
@@ -117,7 +123,7 @@ final class Renderer {
 							continue;
 						}
 
-						$computed           = null !== $binding['default'] ? $this->evaluator->evaluate( $binding['default'], $ctx ) : null;
+						$computed                   = null !== $binding['default'] ? $this->evaluator->evaluate( $binding['default'], $ctx ) : null;
 						$ctx->set( $binding['name'], $computed );
 						$values[ $binding['name'] ] = $computed;
 					}
@@ -125,18 +131,39 @@ final class Renderer {
 					continue;
 				}
 
-				$computed                      = $this->evaluator->evaluate( $declaration->expr, $ctx );
-				$ctx->set( $declaration->name, $computed );
-				$values[ $declaration->name ] = $computed;
+				if ( $stmt instanceof Node\Frontmatter ) {
+					$computed                   = $this->evaluator->evaluate( $stmt->expr, $ctx );
+					$ctx->set( $stmt->name, $computed );
+					$values[ $stmt->name ] = $computed;
+
+					continue;
+				}
+
+				$res = $this->evaluator->evaluateStatement( $stmt, $ctx );
+
+				if ( $res instanceof ReturnSignal ) {
+					if ( null !== $document->frontmatterReturn && $stmt instanceof Node\FrontmatterReturn && $stmt->expr === $document->frontmatterReturn ) {
+						// This is the top-level props return declaration.
+						continue;
+					}
+
+					$ctx->set( '__early_return__' , true );
+					if ( null !== $res->value ) {
+						$ctx->set( 'props', $res->value );
+					}
+					break;
+				}
 			} catch ( LiqxException $e ) {
-				$this->stampLine( $e, $declaration->line );
+				if ( isset( $stmt->line ) ) {
+					$this->stampLine( $e, $stmt->line );
+				}
 
 				throw $e;
 			}
 		}
 
 		// A final `return { … };` becomes the body's `props`.
-		if ( null !== $document->frontmatterReturn ) {
+		if ( null !== $document->frontmatterReturn && ! $ctx->get( '__early_return__' ) ) {
 			$props                      = $this->evaluator->evaluate( $document->frontmatterReturn, $ctx );
 			$values['props']            = $props;
 			$ctx->set( 'props', $props );

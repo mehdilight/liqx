@@ -20,7 +20,13 @@ use Phpmystic\Liqx\Expr\TemplateString;
 use Phpmystic\Liqx\Expr\Unary;
 use Phpmystic\Liqx\Node\Element;
 use Phpmystic\Liqx\Node\Frontmatter;
+use Phpmystic\Liqx\Node\FrontmatterAssignment;
 use Phpmystic\Liqx\Node\FrontmatterDestructure;
+use Phpmystic\Liqx\Node\FrontmatterFunction;
+use Phpmystic\Liqx\Node\FrontmatterIf;
+use Phpmystic\Liqx\Node\FrontmatterReturn;
+use Phpmystic\Liqx\Node\FrontmatterSwitch;
+use Phpmystic\Liqx\ReturnSignal;
 
 /**
  * Evaluates expression values against a Context. This is the "real JS"
@@ -128,6 +134,18 @@ final class Evaluator {
 
 	/** Strict-aware identifier lookup — shared by the interpreter and compiled templates. */
 	public function identifier( Context $ctx, string $name ): mixed {
+		if ( '$props' === $name ) {
+			return $ctx->get( 'props' ) ?? [];
+		}
+
+		if ( '$slots' === $name ) {
+			return $ctx->get( '$slots' ) ?? $ctx->get( 'slots' ) ?? [];
+		}
+
+		if ( '$context' === $name ) {
+			return $ctx->all();
+		}
+
 		if ( ! $ctx->strict ) {
 			return $ctx->get( $name );
 		}
@@ -213,6 +231,27 @@ final class Evaluator {
 	 * @param list<mixed> $args
 	 */
 	public function callNamed( Context $ctx, string $name, array $args ): mixed {
+		if ( '$props' === $name ) {
+			return $ctx->get( 'props' ) ?? [];
+		}
+
+		if ( '$slots' === $name ) {
+			return $ctx->get( '$slots' ) ?? $ctx->get( 'slots' ) ?? [];
+		}
+
+		if ( '$context' === $name ) {
+			return $ctx->all();
+		}
+
+		$local = $ctx->get( $name );
+		if ( is_callable( $local ) ) {
+			return $local( ...$args );
+		}
+
+		if ( $local instanceof ArrowFunction ) {
+			return $this->invoke( $local, $args, $ctx );
+		}
+
 		$entry = $ctx->environment->globalEntry( $name );
 
 		if ( null !== $entry ) {
@@ -325,32 +364,152 @@ final class Evaluator {
 	}
 
 	private function evalBlockBody( BlockBody $expr, Context $ctx ): mixed {
-		foreach ( $expr->declarations as $declaration ) {
-			if ( $declaration instanceof FrontmatterDestructure ) {
-				$value = $this->evaluate( $declaration->init, $ctx );
+		$res = $this->evaluateStatements( $expr->declarations, $ctx );
 
-				foreach ( $declaration->bindings as $binding ) {
-					[ 'found' => $found, 'value' => $resolved ] = $this->lookupProperty( $value, $binding['name'] );
-
-					if ( $found ) {
-						$ctx->set( $binding['name'], $resolved );
-
-						continue;
-					}
-
-					$ctx->set(
-						$binding['name'],
-						null !== $binding['default'] ? $this->evaluate( $binding['default'], $ctx ) : null
-					);
-				}
-
-				continue;
-			}
-
-			$ctx->set( $declaration->name, $this->evaluate( $declaration->expr, $ctx ) );
+		if ( $res instanceof ReturnSignal ) {
+			return $res->value;
 		}
 
 		return null !== $expr->return ? $this->evaluate( $expr->return, $ctx ) : null;
+	}
+
+	public function evaluateStatement( object $stmt, Context $ctx ): mixed {
+		if ( $stmt instanceof FrontmatterDestructure ) {
+			$value = $this->evaluate( $stmt->init, $ctx );
+
+			foreach ( $stmt->bindings as $binding ) {
+				[ 'found' => $found, 'value' => $resolved ] = $this->lookupProperty( $value, $binding['name'] );
+
+				if ( $found ) {
+					$ctx->set( $binding['name'], $resolved );
+
+					continue;
+				}
+
+				$ctx->set(
+					$binding['name'],
+					null !== $binding['default'] ? $this->evaluate( $binding['default'], $ctx ) : null
+				);
+			}
+
+			return null;
+		}
+
+		if ( $stmt instanceof Frontmatter ) {
+			$ctx->set( $stmt->name, $this->evaluate( $stmt->expr, $ctx ) );
+
+			return null;
+		}
+
+		if ( $stmt instanceof FrontmatterAssignment ) {
+			$val = $this->evaluate( $stmt->expr, $ctx );
+			if ( '=' === $stmt->operator ) {
+				$ctx->set( $stmt->name, $val );
+			} elseif ( '+=' === $stmt->operator ) {
+				$ctx->set( $stmt->name, $this->add( $ctx->get( $stmt->name ), $val ) );
+			} elseif ( '-=' === $stmt->operator ) {
+				$ctx->set( $stmt->name, $this->toNumber( $ctx->get( $stmt->name ) ) - $this->toNumber( $val ) );
+			} elseif ( '*=' === $stmt->operator ) {
+				$ctx->set( $stmt->name, $this->toNumber( $ctx->get( $stmt->name ) ) * $this->toNumber( $val ) );
+			} elseif ( '/=' === $stmt->operator ) {
+				$ctx->set( $stmt->name, $this->divide( $this->toNumber( $ctx->get( $stmt->name ) ), $this->toNumber( $val ) ) );
+			} elseif ( '%=' === $stmt->operator ) {
+				$ctx->set( $stmt->name, $this->modulo( $this->toNumber( $ctx->get( $stmt->name ) ), $this->toNumber( $val ) ) );
+			}
+
+			return null;
+		}
+
+		if ( $stmt instanceof FrontmatterIf ) {
+			if ( $this->truthy( $this->evaluate( $stmt->test, $ctx ) ) ) {
+				return $this->evaluateStatements( $stmt->then, $ctx );
+			}
+
+			foreach ( $stmt->elseIfs as $elseIf ) {
+				if ( $this->truthy( $this->evaluate( $elseIf['test'], $ctx ) ) ) {
+					return $this->evaluateStatements( $elseIf['body'], $ctx );
+				}
+			}
+
+			if ( ! empty( $stmt->else ) ) {
+				return $this->evaluateStatements( $stmt->else, $ctx );
+			}
+
+			return null;
+		}
+
+		if ( $stmt instanceof FrontmatterSwitch ) {
+			$disc = $this->evaluate( $stmt->discriminant, $ctx );
+			$matched = false;
+
+			foreach ( $stmt->cases as $case ) {
+				if ( null !== $case['test'] ) {
+					$caseVal = $this->evaluate( $case['test'], $ctx );
+					if ( $this->looseEqual( $disc, $caseVal ) ) {
+						$matched = true;
+						return $this->evaluateStatements( $case['body'], $ctx );
+					}
+				}
+			}
+
+			if ( ! $matched ) {
+				foreach ( $stmt->cases as $case ) {
+					if ( null === $case['test'] ) {
+						return $this->evaluateStatements( $case['body'], $ctx );
+					}
+				}
+			}
+
+			return null;
+		}
+
+		if ( $stmt instanceof FrontmatterFunction ) {
+			$func = $stmt;
+			$fn = function( ...$args ) use ( $func, $ctx ) {
+				$ctx->push();
+				foreach ( $func->params as $i => $param ) {
+					$val = array_key_exists( $i, $args ) ? $args[$i] : ( null !== $param['default'] ? $this->evaluate( $param['default'], $ctx ) : null );
+					$ctx->set( $param['name'], $val );
+				}
+
+				$result = $this->evaluateStatements( $func->body, $ctx );
+
+				if ( $result instanceof ReturnSignal ) {
+					$res = $result->value;
+				} else {
+					$res = null !== $func->return ? $this->evaluate( $func->return, $ctx ) : $result;
+				}
+
+				$ctx->pop();
+
+				return $res;
+			};
+
+			$ctx->set( $stmt->name, $fn );
+
+			return null;
+		}
+
+		if ( $stmt instanceof FrontmatterReturn ) {
+			return new ReturnSignal( null !== $stmt->expr ? $this->evaluate( $stmt->expr, $ctx ) : null );
+		}
+
+		if ( $stmt instanceof Expr ) {
+			return $this->evaluate( $stmt, $ctx );
+		}
+
+		return null;
+	}
+
+	public function evaluateStatements( array $stmts, Context $ctx ): mixed {
+		foreach ( $stmts as $stmt ) {
+			$res = $this->evaluateStatement( $stmt, $ctx );
+			if ( $res instanceof ReturnSignal ) {
+				return $res;
+			}
+		}
+
+		return null;
 	}
 
 	private function evalFiltered( Filtered $expr, Context $ctx ): mixed {

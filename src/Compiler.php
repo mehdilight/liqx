@@ -21,7 +21,12 @@ use Phpmystic\Liqx\Expr\Unary;
 use Phpmystic\Liqx\Node\Document;
 use Phpmystic\Liqx\Node\Element;
 use Phpmystic\Liqx\Node\Frontmatter;
+use Phpmystic\Liqx\Node\FrontmatterAssignment;
 use Phpmystic\Liqx\Node\FrontmatterDestructure;
+use Phpmystic\Liqx\Node\FrontmatterFunction;
+use Phpmystic\Liqx\Node\FrontmatterIf;
+use Phpmystic\Liqx\Node\FrontmatterReturn;
+use Phpmystic\Liqx\Node\FrontmatterSwitch;
 use Phpmystic\Liqx\Node\Output;
 use Phpmystic\Liqx\Node\Script;
 use Phpmystic\Liqx\Node\Style;
@@ -197,6 +202,10 @@ final class Compiler {
 		$lines[] = '    try {';
 
 		foreach ( $document->frontmatter as $declaration ) {
+			if ( null !== $document->frontmatterReturn && $declaration instanceof FrontmatterReturn && $declaration->expr === $document->frontmatterReturn ) {
+				continue;
+			}
+
 			foreach ( $this->declarationLines( $declaration ) as $line ) {
 				$lines[] = '        ' . $line;
 			}
@@ -259,7 +268,7 @@ final class Compiler {
 	 *
 	 * @return list<string> PHP statements
 	 */
-	private function declarationLines( Frontmatter|FrontmatterDestructure $declaration ): array {
+	private function declarationLines( object $declaration ): array {
 		if ( $declaration instanceof FrontmatterDestructure ) {
 			// Destructuring reads data at runtime — never static.
 			$lines = [ '$__src = ' . $this->expr( $declaration->init ) . ';' ];
@@ -281,32 +290,133 @@ final class Compiler {
 			return $lines;
 		}
 
-		// A static `const x = <literal-tree>` is folded once at compile time and
-		// baked into the artifact as a literal, so the render loop never
-		// recomputes it. Non-static consts fall through to a runtime `$ctx->set`.
-		$static = $this->tryStaticValue( $declaration->expr );
+		if ( $declaration instanceof Frontmatter ) {
+			// A static `const x = <literal-tree>` is folded once at compile time and
+			// baked into the artifact as a literal, so the render loop never
+			// recomputes it. Non-static consts fall through to a runtime `$ctx->set`.
+			$static = $this->tryStaticValue( $declaration->expr );
 
-		if ( $static['folded'] ) {
-			$this->staticConsts[ $declaration->name ] = $static['value'];
-			$var                                      = $this->freshVar();
+			if ( $static['folded'] ) {
+				$this->staticConsts[ $declaration->name ] = $static['value'];
+				$var                                      = $this->freshVar();
 
-			$line = '$ctx->set( ' . var_export( $declaration->name, true ) . ', $' . $var . ' = ' . var_export( $static['value'], true ) . ' );';
+				$line = '$ctx->set( ' . var_export( $declaration->name, true ) . ', $' . $var . ' = ' . var_export( $static['value'], true ) . ' );';
 
+				$this->bindLocal( $declaration->name, $var );
+
+				return [ $line ];
+			}
+
+			unset( $this->staticConsts[ $declaration->name ] );
+
+			$init = $this->expr( $declaration->expr );
+			$var  = $this->freshVar();
+			$line = '$ctx->set( ' . var_export( $declaration->name, true ) . ', $' . $var . ' = ' . $init . ' );';
+
+			// Bound after the initializer compiles: `const x = x` reads the outer x.
 			$this->bindLocal( $declaration->name, $var );
 
 			return [ $line ];
 		}
 
-		unset( $this->staticConsts[ $declaration->name ] );
+		if ( $declaration instanceof FrontmatterAssignment ) {
+			$val = $this->expr( $declaration->expr );
+			$resolved = $this->resolveBound( $declaration->name );
+			if ( null !== $resolved ) {
+				$var = $resolved[0];
+				return [ '$ctx->set( ' . var_export( $declaration->name, true ) . ', $' . $var . ' ' . $declaration->operator . ' ' . $val . ' );' ];
+			}
 
-		$init = $this->expr( $declaration->expr );
-		$var  = $this->freshVar();
-		$line = '$ctx->set( ' . var_export( $declaration->name, true ) . ', $' . $var . ' = ' . $init . ' );';
+			$var = $this->freshVar();
+			$this->bindLocal( $declaration->name, $var );
+			return [ '$ctx->set( ' . var_export( $declaration->name, true ) . ', $' . $var . ' ' . $declaration->operator . ' ' . $val . ' );' ];
+		}
 
-		// Bound after the initializer compiles: `const x = x` reads the outer x.
-		$this->bindLocal( $declaration->name, $var );
+		if ( $declaration instanceof FrontmatterIf ) {
+			$lines = [ 'if ( $eval->truthy( ' . $this->expr( $declaration->test ) . ' ) ) {' ];
+			foreach ( $declaration->then as $inner ) {
+				foreach ( $this->declarationLines( $inner ) as $l ) {
+					$lines[] = '    ' . $l;
+				}
+			}
+			foreach ( $declaration->elseIfs as $elseIf ) {
+				$lines[] = '} elseif ( $eval->truthy( ' . $this->expr( $elseIf['test'] ) . ' ) ) {';
+				foreach ( $elseIf['body'] as $inner ) {
+					foreach ( $this->declarationLines( $inner ) as $l ) {
+						$lines[] = '    ' . $l;
+					}
+				}
+			}
+			if ( ! empty( $declaration->else ) ) {
+				$lines[] = '} else {';
+				foreach ( $declaration->else as $inner ) {
+					foreach ( $this->declarationLines( $inner ) as $l ) {
+						$lines[] = '    ' . $l;
+					}
+				}
+			}
+			$lines[] = '}';
+			return $lines;
+		}
 
-		return [ $line ];
+		if ( $declaration instanceof FrontmatterSwitch ) {
+			$lines = [ 'switch ( ' . $this->expr( $declaration->discriminant ) . ' ) {' ];
+			foreach ( $declaration->cases as $case ) {
+				if ( null !== $case['test'] ) {
+					$lines[] = '    case ' . $this->expr( $case['test'] ) . ':';
+				} else {
+					$lines[] = '    default:';
+				}
+				foreach ( $case['body'] as $inner ) {
+					foreach ( $this->declarationLines( $inner ) as $l ) {
+						$lines[] = '        ' . $l;
+					}
+				}
+				$lines[] = '        break;';
+			}
+			$lines[] = '}';
+			return $lines;
+		}
+
+		if ( $declaration instanceof FrontmatterFunction ) {
+			$var = $this->freshVar();
+			$lines = [];
+			$lines[] = '$' . $var . ' = function( ...$__args ) use ( &$ctx, $eval ) {';
+			$lines[] = '    $ctx->push();';
+			$lines[] = '    try {';
+			foreach ( $declaration->params as $i => $param ) {
+				$def = null !== $param['default'] ? $this->expr( $param['default'] ) : 'null';
+				$paramVar = $this->freshVar();
+				$lines[] = '        $' . $paramVar . ' = array_key_exists( ' . $i . ', $__args ) ? $__args[' . $i . '] : ' . $def . ';';
+				$lines[] = '        $ctx->set( ' . var_export( $param['name'], true ) . ', $' . $paramVar . ' );';
+				$this->bindLocal( $param['name'], $paramVar );
+			}
+			foreach ( $declaration->body as $inner ) {
+				foreach ( $this->declarationLines( $inner ) as $l ) {
+					$lines[] = '        ' . $l;
+				}
+			}
+			if ( null !== $declaration->return ) {
+				$lines[] = '        return ' . $this->expr( $declaration->return ) . ';';
+			}
+			$lines[] = '    } finally {';
+			$lines[] = '        $ctx->pop();';
+			$lines[] = '    }';
+			$lines[] = '};';
+			$lines[] = '$ctx->set( ' . var_export( $declaration->name, true ) . ', $' . $var . ' );';
+			$this->bindLocal( $declaration->name, $var );
+			return $lines;
+		}
+
+		if ( $declaration instanceof FrontmatterReturn ) {
+			return [ 'return ' . ( null !== $declaration->expr ? $this->expr( $declaration->expr ) : "''" ) . ';' ];
+		}
+
+		if ( $declaration instanceof Expr ) {
+			return [ $this->expr( $declaration ) . ';' ];
+		}
+
+		return [];
 	}
 
 	/**
@@ -456,7 +566,7 @@ final class Compiler {
 	 *
 	 * @return list<string> PHP statements (each carrying its trailing `;`)
 	 */
-	private function declarationLinesLocals( Frontmatter|FrontmatterDestructure $declaration ): array {
+	private function declarationLinesLocals( object $declaration ): array {
 		if ( $declaration instanceof FrontmatterDestructure ) {
 			$srcVar = $this->freshVar();
 			$init   = $this->expr( $declaration->init );
@@ -474,12 +584,83 @@ final class Compiler {
 			return $lines;
 		}
 
-		$init = $this->expr( $declaration->expr );
-		$var  = $this->freshVar();
+		if ( $declaration instanceof Frontmatter ) {
+			$init = $this->expr( $declaration->expr );
+			$var  = $this->freshVar();
 
-		$this->bindLocal( $declaration->name, $var );
+			$this->bindLocal( $declaration->name, $var );
 
-		return [ '( $' . $var . ' = ' . $init . ' );' ];
+			return [ '( $' . $var . ' = ' . $init . ' );' ];
+		}
+
+		if ( $declaration instanceof FrontmatterAssignment ) {
+			$val = $this->expr( $declaration->expr );
+			$resolved = $this->resolveBound( $declaration->name );
+			if ( null !== $resolved ) {
+				$var = $resolved[0];
+				return [ '( $' . $var . ' ' . $declaration->operator . ' ' . $val . ' );' ];
+			}
+
+			$var = $this->freshVar();
+			$this->bindLocal( $declaration->name, $var );
+			return [ '( $' . $var . ' ' . $declaration->operator . ' ' . $val . ' );' ];
+		}
+
+		if ( $declaration instanceof FrontmatterIf ) {
+			$lines = [ 'if ( $eval->truthy( ' . $this->expr( $declaration->test ) . ' ) ) {' ];
+			foreach ( $declaration->then as $inner ) {
+				foreach ( $this->declarationLinesLocals( $inner ) as $l ) {
+					$lines[] = '    ' . $l;
+				}
+			}
+			foreach ( $declaration->elseIfs as $elseIf ) {
+				$lines[] = '} elseif ( $eval->truthy( ' . $this->expr( $elseIf['test'] ) . ' ) ) {';
+				foreach ( $elseIf['body'] as $inner ) {
+					foreach ( $this->declarationLinesLocals( $inner ) as $l ) {
+						$lines[] = '    ' . $l;
+					}
+				}
+			}
+			if ( ! empty( $declaration->else ) ) {
+				$lines[] = '} else {';
+				foreach ( $declaration->else as $inner ) {
+					foreach ( $this->declarationLinesLocals( $inner ) as $l ) {
+						$lines[] = '    ' . $l;
+					}
+				}
+			}
+			$lines[] = '}';
+			return $lines;
+		}
+
+		if ( $declaration instanceof FrontmatterSwitch ) {
+			$lines = [ 'switch ( ' . $this->expr( $declaration->discriminant ) . ' ) {' ];
+			foreach ( $declaration->cases as $case ) {
+				if ( null !== $case['test'] ) {
+					$lines[] = '    case ' . $this->expr( $case['test'] ) . ':';
+				} else {
+					$lines[] = '    default:';
+				}
+				foreach ( $case['body'] as $inner ) {
+					foreach ( $this->declarationLinesLocals( $inner ) as $l ) {
+						$lines[] = '        ' . $l;
+					}
+				}
+				$lines[] = '        break;';
+			}
+			$lines[] = '}';
+			return $lines;
+		}
+
+		if ( $declaration instanceof FrontmatterReturn ) {
+			return [ 'return ' . ( null !== $declaration->expr ? $this->expr( $declaration->expr ) : 'null' ) . ';' ];
+		}
+
+		if ( $declaration instanceof Expr ) {
+			return [ $this->expr( $declaration ) . ';' ];
+		}
+
+		return [];
 	}
 
 	// ---------------------------------------------------------------------
@@ -1152,6 +1333,18 @@ final class Compiler {
 		}
 
 		if ( $expression instanceof Identifier ) {
+			if ( '$props' === $expression->name ) {
+				return '( $ctx->get( \'props\' ) ?? [] )';
+			}
+
+			if ( '$slots' === $expression->name ) {
+				return '( $ctx->get( \'$slots\' ) ?? $ctx->get( \'slots\' ) ?? [] )';
+			}
+
+			if ( '$context' === $expression->name ) {
+				return '( $ctx->all() )';
+			}
+
 			$resolved = $this->resolveBound( $expression->name );
 
 			if ( null !== $resolved ) {

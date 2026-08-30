@@ -22,7 +22,12 @@ use Phpmystic\Liqx\Expr\Unary;
 use Phpmystic\Liqx\Node;
 use Phpmystic\Liqx\Node\Element;
 use Phpmystic\Liqx\Node\Frontmatter;
+use Phpmystic\Liqx\Node\FrontmatterAssignment;
 use Phpmystic\Liqx\Node\FrontmatterDestructure;
+use Phpmystic\Liqx\Node\FrontmatterFunction;
+use Phpmystic\Liqx\Node\FrontmatterIf;
+use Phpmystic\Liqx\Node\FrontmatterReturn;
+use Phpmystic\Liqx\Node\FrontmatterSwitch;
 use Phpmystic\Liqx\Node\Output;
 use Phpmystic\Liqx\Node\Schema;
 use Phpmystic\Liqx\Node\Script;
@@ -134,7 +139,7 @@ final class ExpressionParser {
 	}
 
 	/**
-	 * `{ const a = …; const { b } = c; return …; }` — declarations run in the
+	 * `{ const a = …; if (c) return …; return …; }` — statements run in the
 	 * arrow's scope, the trailing `return` is its value.
 	 */
 	private function parseBlockBody(): BlockBody {
@@ -148,30 +153,243 @@ final class ExpressionParser {
 				throw new SyntaxException( 'Unterminated block body' );
 			}
 
-			if ( TokenType::Keyword === $token->type && 'return' === $token->value ) {
-				$this->stream->next();
-				$return = $this->parse();
-				$this->stream->accept( TokenType::Semicolon );
-				$this->stream->expectValue( TokenType::Operator, '}' );
+			$stmt = $this->parseFrontmatterStatement();
 
-				break;
+			if ( $stmt instanceof FrontmatterReturn ) {
+				$return = $stmt->expr;
+				$declarations[] = $stmt;
+				if ( null !== $this->stream->acceptValue( TokenType::Operator, '}' ) ) {
+					break;
+				}
+				continue;
 			}
 
-			$declarations[] = $this->parseDeclaration();
+			$declarations[] = $stmt;
 		}
 
 		return new BlockBody( $declarations, $return );
 	}
 
 	/**
-	 * A `const`/`let` declaration — shared by the frontmatter and arrow block
+	 * Parse a frontmatter statement: `const/let/var`, `if`, `switch`, `function`, `return`, assignment, etc.
+	 */
+	public function parseFrontmatterStatement(): object {
+		$token = $this->stream->current();
+		if ( null === $token ) {
+			throw new SyntaxException( 'Unexpected end of frontmatter' );
+		}
+
+		if ( TokenType::Keyword === $token->type ) {
+			if ( in_array( $token->value, [ 'const', 'let', 'var' ], true ) ) {
+				return $this->parseDeclaration();
+			}
+
+			if ( 'if' === $token->value ) {
+				return $this->parseIfStatement();
+			}
+
+			if ( 'switch' === $token->value ) {
+				return $this->parseSwitchStatement();
+			}
+
+			if ( 'function' === $token->value ) {
+				return $this->parseFunctionStatement();
+			}
+
+			if ( 'return' === $token->value ) {
+				$this->stream->next();
+				$line = $token->line;
+				$expr = null;
+
+				if ( null === $this->stream->accept( TokenType::Semicolon ) ) {
+					$next = $this->stream->current();
+					if ( null !== $next && TokenType::Operator !== $next->type && '}' !== $next->value && TokenType::FrontmatterEnd !== $next->type ) {
+						$expr = $this->parse();
+					}
+					$this->stream->accept( TokenType::Semicolon );
+				}
+
+				return new FrontmatterReturn( $expr, $line );
+			}
+
+			if ( 'break' === $token->value ) {
+				$this->stream->next();
+				$this->stream->accept( TokenType::Semicolon );
+
+				return new FrontmatterReturn( null, $token->line );
+			}
+		}
+
+		// Check for assignment: identifier = expr; or identifier += expr;
+		if ( TokenType::Identifier === $token->type ) {
+			$save = $this->stream->position();
+			$name = $this->stream->next()->value;
+			$next = $this->stream->current();
+
+			if ( null !== $next && TokenType::Operator === $next->type && in_array( $next->value, [ '=', '+=', '-=', '*=', '/=', '%=' ], true ) ) {
+				$op = $this->stream->next()->value;
+				$expr = $this->parse();
+				$this->stream->accept( TokenType::Semicolon );
+
+				return new FrontmatterAssignment( $name, $op, $expr, $token->line );
+			}
+
+			$this->stream->seek( $save );
+		}
+
+		// Fallback: standalone expression
+		$expr = $this->parse();
+		$this->stream->accept( TokenType::Semicolon );
+
+		return $expr;
+	}
+
+	public function parseIfStatement(): FrontmatterIf {
+		$keyword = $this->stream->expect( TokenType::Keyword );
+		$line = $keyword->line;
+		$this->stream->expect( TokenType::OpenParen );
+		$test = $this->parse();
+		$this->stream->expect( TokenType::CloseParen );
+		$then = $this->parseBlockOrStatement();
+
+		$elseIfs = [];
+		$else = [];
+
+		while ( null !== $this->acceptKeyword( 'else' ) ) {
+			if ( null !== $this->acceptKeyword( 'if' ) ) {
+				$this->stream->expect( TokenType::OpenParen );
+				$elseIfTest = $this->parse();
+				$this->stream->expect( TokenType::CloseParen );
+				$elseIfBody = $this->parseBlockOrStatement();
+				$elseIfs[] = [ 'test' => $elseIfTest, 'body' => $elseIfBody ];
+			} else {
+				$else = $this->parseBlockOrStatement();
+				break;
+			}
+		}
+
+		return new FrontmatterIf( $test, $then, $elseIfs, $else, $line );
+	}
+
+	public function parseSwitchStatement(): FrontmatterSwitch {
+		$keyword = $this->stream->expect( TokenType::Keyword );
+		$line = $keyword->line;
+		$this->stream->expect( TokenType::OpenParen );
+		$discriminant = $this->parse();
+		$this->stream->expect( TokenType::CloseParen );
+		$this->stream->expectValue( TokenType::Operator, '{' );
+
+		$cases = [];
+
+		while ( null === $this->stream->acceptValue( TokenType::Operator, '}' ) ) {
+			if ( $this->stream->eof() ) {
+				throw new SyntaxException( 'Unterminated switch statement', $line );
+			}
+
+			if ( null !== $this->acceptKeyword( 'case' ) ) {
+				$caseTest = $this->parse();
+				$this->stream->expect( TokenType::Colon );
+				$caseBody = $this->parseCaseStatements();
+				$cases[] = [ 'test' => $caseTest, 'body' => $caseBody ];
+			} elseif ( null !== $this->acceptKeyword( 'default' ) ) {
+				$this->stream->expect( TokenType::Colon );
+				$defaultBody = $this->parseCaseStatements();
+				$cases[] = [ 'test' => null, 'body' => $defaultBody ];
+			} else {
+				throw new SyntaxException( 'Expected `case` or `default` inside switch block', $this->stream->current()?->line );
+			}
+		}
+
+		return new FrontmatterSwitch( $discriminant, $cases, $line );
+	}
+
+	private function parseCaseStatements(): array {
+		$stmts = [];
+		while ( ! $this->stream->eof() ) {
+			$token = $this->stream->current();
+			if ( null === $token ) {
+				break;
+			}
+
+			if ( TokenType::Operator === $token->type && '}' === $token->value ) {
+				break;
+			}
+
+			if ( TokenType::Keyword === $token->type && in_array( $token->value, [ 'case', 'default' ], true ) ) {
+				break;
+			}
+
+			if ( TokenType::Keyword === $token->type && 'break' === $token->value ) {
+				$this->stream->next();
+				$this->stream->accept( TokenType::Semicolon );
+				continue;
+			}
+
+			$stmts[] = $this->parseFrontmatterStatement();
+		}
+
+		return $stmts;
+	}
+
+	public function parseFunctionStatement(): FrontmatterFunction {
+		$keyword = $this->stream->expect( TokenType::Keyword );
+		$line = $keyword->line;
+		$name = $this->stream->expect( TokenType::Identifier )->value;
+		$this->stream->expect( TokenType::OpenParen );
+
+		$params = [];
+		while ( null === $this->stream->accept( TokenType::CloseParen ) ) {
+			$paramName = $this->stream->expect( TokenType::Identifier )->value;
+			$default = null;
+			if ( null !== $this->stream->acceptValue( TokenType::Operator, '=' ) ) {
+				$default = $this->parse();
+			}
+			$params[] = [ 'name' => $paramName, 'default' => $default ];
+			if ( null !== $this->stream->accept( TokenType::Comma ) ) {
+				continue;
+			}
+			$this->stream->expect( TokenType::CloseParen );
+			break;
+		}
+
+		$body = $this->parseBlockOrStatement();
+
+		return new FrontmatterFunction( $name, $params, $body, null, $line );
+	}
+
+	private function parseBlockOrStatement(): array {
+		if ( null !== $this->stream->acceptValue( TokenType::Operator, '{' ) ) {
+			$stmts = [];
+			while ( null === $this->stream->acceptValue( TokenType::Operator, '}' ) ) {
+				if ( $this->stream->eof() ) {
+					throw new SyntaxException( 'Unterminated block `{ ... }`' );
+				}
+				$stmts[] = $this->parseFrontmatterStatement();
+			}
+			return $stmts;
+		}
+
+		return [ $this->parseFrontmatterStatement() ];
+	}
+
+	private function acceptKeyword( string $name ): ?Token {
+		$token = $this->stream->current();
+		if ( null !== $token && TokenType::Keyword === $token->type && $token->value === $name ) {
+			$this->stream->next();
+			return $token;
+		}
+		return null;
+	}
+
+	/**
+	 * A `const`/`let`/`var` declaration — shared by the frontmatter and arrow block
 	 * bodies. Returns the single binding or the destructuring form.
 	 */
 	public function parseDeclaration(): Frontmatter|FrontmatterDestructure {
 		$keyword = $this->stream->accept( TokenType::Keyword );
 
-		if ( null === $keyword || ! in_array( $keyword->value, [ 'const', 'let' ], true ) ) {
-			throw new SyntaxException( 'Expected `const`/`let` declaration', $this->stream->current()?->line );
+		if ( null === $keyword || ! in_array( $keyword->value, [ 'const', 'let', 'var' ], true ) ) {
+			throw new SyntaxException( 'Expected `const`/`let`/`var` declaration', $this->stream->current()?->line );
 		}
 
 		$line = $keyword->line;
@@ -206,9 +424,13 @@ final class ExpressionParser {
 		}
 
 		$name = $this->stream->expect( TokenType::Identifier )->value;
-		$this->stream->expectValue( TokenType::Operator, '=' );
 
-		$expr = $this->parse();
+		if ( null !== $this->stream->acceptValue( TokenType::Operator, '=' ) ) {
+			$expr = $this->parse();
+		} else {
+			$expr = new Literal( null );
+		}
+
 		$this->stream->accept( TokenType::Semicolon );
 
 		return new Frontmatter( $name, $expr, $line );

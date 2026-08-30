@@ -100,4 +100,16 @@ final class Context {
 
 		return $context;
 	}
+
+	/** @return array<string, mixed> */
+	public function all(): array {
+		$merged = [];
+		foreach ( $this->scopes as $scope ) {
+			foreach ( $scope as $k => $v ) {
+				$merged[ $k ] = $v;
+			}
+		}
+
+		return $merged;
+	}
 }

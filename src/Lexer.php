@@ -906,6 +906,7 @@ final class Lexer {
 	private function isIdentifierStart( string $char ): bool {
 		return ( $char >= 'a' && $char <= 'z' )
 			|| ( $char >= 'A' && $char <= 'Z' )
-			|| '_' === $char;
+			|| '_' === $char
+			|| '$' === $char;
 	}
 }

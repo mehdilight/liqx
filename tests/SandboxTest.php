@@ -73,10 +73,9 @@ final class SandboxTest extends TestCase {
 		$this->parseFrontmatter( 'const x = obj.constructor;' );
 	}
 
-	public function testRejectsArbitraryArrowFunction(): void {
-		$this->expectException( SyntaxException::class );
-		$this->expectExceptionMessage( 'Arrow functions' );
+	public function testAllowsArrowFunctionInFrontmatter(): void {
 		$this->parseFrontmatter( 'const double = x => x * 2;' );
+		$this->addToAssertionCount( 1 );
 	}
 
 	public function testRejectsJsxInFrontmatter(): void {
