@@ -9,6 +9,8 @@
     { "include": "#verbatim-schema" },
     { "include": "#comment" },
     { "include": "#expression" },
+    { "include": "#component-close-tag" },
+    { "include": "#component-tag" },
     { "include": "text.html.basic" }
   ],
   "injections": {
@@ -169,10 +171,44 @@
       ]
     },
 
+    "component-tag": {
+      "name": "meta.tag.component.liqx",
+      "begin": "(<)([A-Z][a-zA-Z0-9_]*)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.liqx" },
+        "2": { "name": "entity.name.tag.component.liqx support.class.component.liqx" }
+      },
+      "end": "(/?>)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.tag.end.liqx" }
+      },
+      "patterns": [
+        { "include": "#tag-attributes" }
+      ]
+    },
+
+    "component-close-tag": {
+      "name": "meta.tag.component.close.liqx",
+      "match": "(</)([A-Z][a-zA-Z0-9_]*)(>)",
+      "captures": {
+        "1": { "name": "punctuation.definition.tag.begin.liqx" },
+        "2": { "name": "entity.name.tag.component.liqx support.class.component.liqx" },
+        "3": { "name": "punctuation.definition.tag.end.liqx" }
+      }
+    },
+
     "tag-attributes": {
       "patterns": [
         { "include": "#comment" },
         { "include": "#expression" },
+        {
+          "match": "(?i)\\b(class)(:)([-\\w:.]+)",
+          "captures": {
+            "1": { "name": "entity.other.attribute-name.liqx keyword.other.class-directive.liqx" },
+            "2": { "name": "punctuation.separator.colon.liqx" },
+            "3": { "name": "entity.other.attribute-name.class.liqx" }
+          }
+        },
         {
           "match": "(?i)([a-z_:][-\\w:.]*)",
           "name": "entity.other.attribute-name.liqx"

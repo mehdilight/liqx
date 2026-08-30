@@ -28,15 +28,28 @@
   ],
   "autoCloseBefore": ";:.,=}])>`\" \n\t",
   "wordPattern": "([a-zA-Z_$][a-zA-Z0-9_$]*)",
+  "indentationRules": {
+    "increaseIndentPattern": "^((?!\\/\\/).)*(\\{[^}\"']*|\\([^)\"']*|\\[[^\\]\"']*|<(?!\\?|(?:area|base|br|col|embed|hr|img|input|link|meta|param|source|track|wbr)\\b)[a-zA-Z][^>]*[^\\/]>|=>\\s*)$",
+    "decreaseIndentPattern": "^\\s*(\\}[,\\;]?|\\)[,\\;]?|\\][,\\;]?|<\\/[a-zA-Z][^>]*>)"
+  },
   "onEnterRules": [
     {
-      "beforeText": "<([a-zA-Z][\\w:.-]*)(?:\\s[^>]*?(?<!/))?>$",
-      "afterText": "^</([a-zA-Z][\\w:.-]*)>$",
+      "beforeText": "(\\{|\\(|\\[|<([a-zA-Z][\\w:.-]*)(?:\\s[^>]*?(?<!/))?>)\\s*$",
+      "afterText": "^\\s*(\\}|\\)|\\]|</([a-zA-Z][\\w:.-]*)>)",
       "action": { "indent": "indentOutdent" }
     },
     {
-      "beforeText": "<([a-zA-Z][\\w:.-]*)(?:\\s[^>]*?(?<!/))?>$",
+      "beforeText": "=>\\s*\\(?\\s*$",
+      "afterText": "^\\s*\\)?",
+      "action": { "indent": "indentOutdent" }
+    },
+    {
+      "beforeText": "(\\{|\\(|\\[|=>|<([a-zA-Z][\\w:.-]*)(?:\\s[^>]*?(?<!/))?>)\\s*$",
       "action": { "indent": "indent" }
+    },
+    {
+      "beforeText": "^\\s*(\\}|\\)|\\]|</([a-zA-Z][\\w:.-]*)>)",
+      "action": { "indent": "none" }
     }
   ]
 }

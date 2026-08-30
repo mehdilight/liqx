@@ -16,6 +16,14 @@
         </context>
     </template>
 
+    <template name="comp" value="&lt;$COMPONENT$ $PROPS$ /&gt;" description="Render a snippet component" toReformat="true" toShortenFQNames="true">
+        <variable name="COMPONENT" expression="" defaultValue="&quot;ProductCard&quot;" alwaysStopAt="true"/>
+        <variable name="PROPS" expression="" defaultValue="&quot;product={item}&quot;" alwaysStopAt="true"/>
+        <context>
+            <option name="LIQX" value="true"/>
+        </context>
+    </template>
+
     <template name="render" value="{render('$SNIPPET$', { $PROPS$ })}" description="Render a snippet partial" toReformat="true" toShortenFQNames="true">
         <variable name="SNIPPET" expression="" defaultValue="&quot;snippet&quot;" alwaysStopAt="true"/>
         <variable name="PROPS" expression="" defaultValue="&quot;&quot;" alwaysStopAt="true"/>
@@ -26,6 +34,52 @@
 
     <template name="section" value="{section('$SECTION$')}" description="Render a theme section" toReformat="true" toShortenFQNames="true">
         <variable name="SECTION" expression="" defaultValue="&quot;section-name&quot;" alwaysStopAt="true"/>
+        <context>
+            <option name="LIQX" value="true"/>
+        </context>
+    </template>
+
+    <template name="classmod" value="class:$CLASS$={$CONDITION$}" description="Conditional class modifier (Svelte-style)" toReformat="true" toShortenFQNames="true">
+        <variable name="CLASS" expression="" defaultValue="&quot;active&quot;" alwaysStopAt="true"/>
+        <variable name="CONDITION" expression="" defaultValue="&quot;isActive&quot;" alwaysStopAt="true"/>
+        <context>
+            <option name="LIQX" value="true"/>
+        </context>
+    </template>
+
+    <template name="if" value="&lt;If condition={$CONDITION$}&gt;&#10;  $END$&#10;&lt;/If&gt;" description="Conditional block component" toReformat="true" toShortenFQNames="true">
+        <variable name="CONDITION" expression="" defaultValue="&quot;condition&quot;" alwaysStopAt="true"/>
+        <context>
+            <option name="LIQX" value="true"/>
+        </context>
+    </template>
+
+    <template name="ifelse" value="&lt;If condition={$CONDITION$}&gt;&#10;  $THEN$&#10;&lt;Else&gt;&#10;  $ELSE$&#10;&lt;/Else&gt;&#10;&lt;/If&gt;" description="If-Else block component" toReformat="true" toShortenFQNames="true">
+        <variable name="CONDITION" expression="" defaultValue="&quot;condition&quot;" alwaysStopAt="true"/>
+        <variable name="THEN" expression="" defaultValue="&quot;&quot;" alwaysStopAt="true"/>
+        <variable name="ELSE" expression="" defaultValue="&quot;&quot;" alwaysStopAt="true"/>
+        <context>
+            <option name="LIQX" value="true"/>
+        </context>
+    </template>
+
+    <template name="show" value="&lt;Show when={$WHEN$}&gt;&#10;  $END$&#10;&lt;/Show&gt;" description="Show component with optional fallback" toReformat="true" toShortenFQNames="true">
+        <variable name="WHEN" expression="" defaultValue="&quot;condition&quot;" alwaysStopAt="true"/>
+        <context>
+            <option name="LIQX" value="true"/>
+        </context>
+    </template>
+
+    <template name="switch" value="&lt;Switch value={$VALUE$}&gt;&#10;  &lt;Match when=&quot;$CASE$&quot;&gt;&#10;    $END$&#10;  &lt;/Match&gt;&#10;  &lt;Default&gt;&#10;  &lt;/Default&gt;&#10;&lt;/Switch&gt;" description="Switch pattern-matching component" toReformat="true" toShortenFQNames="true">
+        <variable name="VALUE" expression="" defaultValue="&quot;value&quot;" alwaysStopAt="true"/>
+        <variable name="CASE" expression="" defaultValue="&quot;case&quot;" alwaysStopAt="true"/>
+        <context>
+            <option name="LIQX" value="true"/>
+        </context>
+    </template>
+
+    <template name="match" value="&lt;Match when=&quot;$CASE$&quot;&gt;&#10;  $END$&#10;&lt;/Match&gt;" description="Match branch for Switch" toReformat="true" toShortenFQNames="true">
+        <variable name="CASE" expression="" defaultValue="&quot;case&quot;" alwaysStopAt="true"/>
         <context>
             <option name="LIQX" value="true"/>
         </context>

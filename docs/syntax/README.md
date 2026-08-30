@@ -18,13 +18,13 @@ render body: HTML + JSX + { expressions }
 |---|------|--------|
 | 1 | [document-structure.md](./01-document-structure.md) | Frontmatter fences, body, block order |
 | 2 | [expressions.md](./02-expressions.md) | `{ }`, literals, operators, ternary, template strings, member access, comments |
-| 3 | [elements-and-attributes.md](./03-elements-and-attributes.md) | JSX elements, attributes, spread, raw injection, void/self-closing |
+| 3 | [elements-and-attributes.md](./03-elements-and-attributes.md) | JSX elements, attributes, class modifiers (`class:modifier={cond}`), spread, raw injection, void/self-closing |
 | 4 | [control-flow-and-lists.md](./04-control-flow-and-lists.md) | `&&` / ternary rendering, `.map` lists, keys, truthiness |
 | 5 | [filters.md](./05-filters.md) | `|` pipeline + full standard filter list |
 | 6 | [frontmatter.md](./06-frontmatter.md) | `const`/`let`, destructuring, `return`/`props`, sandbox rules, `root`, `now()` |
 | 7 | [collection-methods.md](./07-collection-methods.md) | `.map/.filter/.find/.some/.every`, array/string methods, block-body arrows |
 | 8 | [verbatim-blocks.md](./08-verbatim-blocks.md) | `<style>`, `<script>`, `<schema>` and interpolation rules |
-| 9 | [composition.md](./09-composition.md) | `render()`, `section()`, props, scoping, strict mode, output wrapper |
+| 9 | [composition.md](./09-composition.md) | First-class `<PascalCase>` Components, default & named `<slot />`, `render()`, `section()`, props, scoping, strict mode |
 
 Rendering is also available in a compiled mode that emits a native PHP closure
 per template. It is a drop-in switch with identical output — see

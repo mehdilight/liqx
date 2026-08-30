@@ -1,9 +1,75 @@
-# 9. Composition — `render()`, `section()`
+# 9. Composition — Components, `render()`, `section()`
 
-Liqx has no `{% include %}` / `{% section %}` tags. Named partials are
-pulled in with two built-in **globals** called from `{ }` expressions.
+Liqx has no `{% include %}` / `{% section %}` tags. Named partials can be
+rendered as **first-class JSX Components** (`<PascalCase>`) or via built-in
+**globals** called from `{ }` expressions.
 
-## `render("name", props)` — snippets
+## First-Class Components (`<PascalCase>`) & Slots
+
+Any JSX tag starting with an **uppercase letter** is automatically resolved as a
+component snippet from the snippet `FileSystem` (e.g. `<Card>` resolves to `card`,
+`<ProductCard>` resolves to `product-card`, `product_card`, or `ProductCard`).
+
+```liqx
+{/* Self-closing snippet with expression and boolean props */}
+<Card product={featured} size="large" isFeatured />
+
+{/* Component with spread attributes and default slot children */}
+<Modal {...modalAttrs} title="Confirm Purchase">
+  <p>Are you sure you want to buy <b>{featured.title}</b>?</p>
+</Modal>
+```
+
+### Default slot (`props.children` / `<slot />`)
+
+The component body is evaluated in the caller's scope and exposed to the snippet as
+`props.children` or via a `<slot />` element:
+
+`snippets/modal.liqx`:
+```liqx
+---
+const { title } = props;
+---
+<div class="modal">
+  <h2>{title}</h2>
+  <div class="body">
+    <slot />
+  </div>
+</div>
+```
+
+### Named slots (`<template slot="...">` / `<slot name="..." />`)
+
+Named templates inside a component become `props.slots.<name>` or are rendered by
+matching `<slot name="<name>" />`:
+
+```liqx
+<Card product={featured}>
+  <template slot="header">
+    <span class="badge">New</span>
+  </template>
+
+  <p>{featured.title}</p>
+
+  <template slot="footer">
+    <button>Buy Now</button>
+  </template>
+</Card>
+```
+
+`snippets/card.liqx`:
+```liqx
+<div class="card">
+  <slot name="header" />
+  <div class="content"><slot /></div>
+  <slot name="footer" />
+</div>
+```
+
+Slot elements support fallback content when no slot is passed:
+`<slot name="header"><h3>Default Header</h3></slot>`.
+
+## `render("name", props)` — functional snippets
 
 ```liqx
 <main>

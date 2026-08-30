@@ -9,8 +9,129 @@
 // them in sync when those change.
 
 const vscode = require('vscode');
+const fs = require('fs');
+const path = require('path');
 
 const SELECTOR = { language: 'liqx', scheme: '*' };
+
+// --- snippet component discovery -------------------------------------------
+
+function findSnippetDirs(document) {
+  const dirs = [];
+  if (document && document.uri && document.uri.fsPath) {
+    let cur = path.dirname(document.uri.fsPath);
+    for (let i = 0; i < 6; i++) {
+      const candidate = path.join(cur, 'snippets');
+      if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory()) {
+        dirs.push(candidate);
+        break;
+      }
+      const parent = path.dirname(cur);
+      if (parent === cur) break;
+      cur = parent;
+    }
+  }
+  if (vscode.workspace && vscode.workspace.workspaceFolders) {
+    for (const folder of vscode.workspace.workspaceFolders) {
+      for (const rel of ['apps/storefront/cein/snippets', 'apps/storefront/flora/snippets', 'snippets']) {
+        const candidate = path.join(folder.uri.fsPath, rel);
+        if (fs.existsSync(candidate) && fs.statSync(candidate).isDirectory() && !dirs.includes(candidate)) {
+          dirs.push(candidate);
+        }
+      }
+    }
+  }
+  return dirs;
+}
+
+function discoverSnippets(document) {
+  const dirs = findSnippetDirs(document);
+  const components = {};
+
+  for (const dir of dirs) {
+    let files = [];
+    try {
+      files = fs.readdirSync(dir).filter((f) => f.endsWith('.liqx'));
+    } catch (e) {
+      continue;
+    }
+
+    for (const file of files) {
+      const baseName = path.basename(file, '.liqx');
+      const compName = baseName.replace(/(?:^|[-_])([a-z0-9])/gi, (_, c) => c.toUpperCase());
+      if (components[compName]) continue;
+
+      const fullPath = path.join(dir, file);
+      let content = '';
+      try {
+        content = fs.readFileSync(fullPath, 'utf8');
+      } catch (e) {
+        continue;
+      }
+
+      const props = [];
+      const slots = [];
+
+      // 1. const { a, b = 1 } = props;
+      const pm = /(?:const|let|var)\s*\{\s*([^}]+)\s*\}\s*=\s*props\b/.exec(content);
+      if (pm) {
+        for (const part of pm[1].split(',')) {
+          const m = /^\s*([a-zA-Z_]\w*)/.exec(part);
+          if (m && !props.includes(m[1])) props.push(m[1]);
+        }
+      }
+
+      // 2. props.xxx
+      const propRegex = /\bprops\.([a-zA-Z_]\w*)\b/g;
+      let pMatch;
+      while ((pMatch = propRegex.exec(content)) !== null) {
+        const p = pMatch[1];
+        if (p !== 'children' && p !== 'slots' && !props.includes(p)) {
+          props.push(p);
+        }
+      }
+
+      // 3. <schema> props
+      const sm = /<schema>([\s\S]*?)<\/schema>/.exec(content);
+      if (sm) {
+        try {
+          const schema = JSON.parse(sm[1].trim());
+          if (schema && schema.props && typeof schema.props === 'object') {
+            for (const k of Object.keys(schema.props)) {
+              if (!props.includes(k)) props.push(k);
+            }
+          }
+        } catch (e) {}
+      }
+
+      // 4. <slot name="...">
+      const slotRegex = /<slot\s+name=["']([^"']+)["']/gi;
+      let slMatch;
+      while ((slMatch = slotRegex.exec(content)) !== null) {
+        if (!slots.includes(slMatch[1])) slots.push(slMatch[1]);
+      }
+
+      let doc = `### Component \`<${compName} />\`\n\n**Snippet:** \`snippets/${baseName}.liqx\`\n\n`;
+      if (props.length > 0) {
+        doc += `**Props:**\n${props.map((p) => `- \`${p}\``).join('\n')}\n`;
+      }
+      if (slots.length > 0) {
+        doc += `\n**Slots:**\n${slots.map((s) => `- \`${s}\``).join('\n')}\n`;
+      }
+
+      components[compName] = {
+        file: fullPath,
+        component: compName,
+        snippet: baseName,
+        props,
+        slots,
+        doc,
+      };
+    }
+  }
+
+  return components;
+}
 
 // --- docs registry ---------------------------------------------------------
 // entry = { sig, kind, desc, ex? }
@@ -249,6 +370,40 @@ const hoverProvider = {
     const range = document.getWordRangeAtPosition(position);
     if (!range) return undefined;
     const word = document.getText(range);
+
+    // Check Control Flow Components
+    const CONTROL_FLOW_DOCS = {
+      If: '### `<If condition={...}>`\n\nConditionally renders children when `condition` evaluates to truthy. Supports `<ElseIf condition={...}>` and `<Else>` children.',
+      ElseIf: '### `<ElseIf condition={...}>`\n\nBranch condition within an `<If>` block.',
+      Else: '### `<Else>`\n\nFallback branch within an `<If>` block.',
+      Show: '### `<Show when={...} fallback={...}>`\n\nConditionally renders children when `when` is truthy, otherwise renders `fallback` or `<template slot="fallback">`.',
+      Switch: '### `<Switch value={...}>`\n\nPattern-matching component. Evaluates `<Match>` branches in order until a match is found.',
+      Match: '### `<Match when={...}>`\n\nBranch inside a `<Switch>` component.',
+      Default: '### `<Default>`\n\nFallback branch inside a `<Switch>` component.',
+    };
+    if (CONTROL_FLOW_DOCS[word]) {
+      return new vscode.Hover(new vscode.MarkdownString(CONTROL_FLOW_DOCS[word]), range);
+    }
+
+    // Check Component Snippets
+    if (/^[A-Z][a-zA-Z0-9_]*$/.test(word)) {
+      const snippets = discoverSnippets(document);
+      if (snippets[word]) {
+        return new vscode.Hover(new vscode.MarkdownString(snippets[word].doc), range);
+      }
+    }
+
+    // Check Class Modifiers (class:active)
+    const lineText = document.lineAt(position).text;
+    const classModMatch = /class:([\w-]+)/.exec(lineText.slice(Math.max(0, position.character - 20), position.character + 20));
+    if (word.startsWith('class:') || (classModMatch && classModMatch[1] === word)) {
+      const modName = word.startsWith('class:') ? word.slice(6) : (classModMatch ? classModMatch[1] : word);
+      const doc = new vscode.MarkdownString();
+      doc.appendCodeblock(`class:${modName}={condition}`, 'html');
+      doc.appendMarkdown(`\n_class modifier_\n\nConditionally applies the class \`${modName}\` when the expression evaluates to truthy.`);
+      return new vscode.Hover(doc, range);
+    }
+
     const kind = classify(document, range);
 
     let entry;
@@ -284,6 +439,101 @@ const methodProvider = {
   },
 };
 
+const componentProvider = {
+  provideCompletionItems(document, position) {
+    const line = document.lineAt(position).text.slice(0, position.character);
+
+    // 1. Tag position after `<`
+    const tagMatch = /<([A-Za-z_]*)$/.exec(line);
+    if (tagMatch) {
+      const items = [];
+
+      // Control flow components
+      const ifItem = new vscode.CompletionItem('If', vscode.CompletionItemKind.Keyword);
+      ifItem.detail = '<If condition={...}>';
+      ifItem.insertText = new vscode.SnippetString('If condition={${1:condition}}>\n\t$0\n</If>');
+      items.push(ifItem);
+
+      const showItem = new vscode.CompletionItem('Show', vscode.CompletionItemKind.Keyword);
+      showItem.detail = '<Show when={...} fallback={...}>';
+      showItem.insertText = new vscode.SnippetString('Show when={${1:condition}}>\n\t$0\n</Show>');
+      items.push(showItem);
+
+      const switchItem = new vscode.CompletionItem('Switch', vscode.CompletionItemKind.Keyword);
+      switchItem.detail = '<Switch value={...}>';
+      switchItem.insertText = new vscode.SnippetString('Switch value={${1:value}}>\n\t<Match when=\"${2:case}\">\n\t\t$0\n\t</Match>\n\t<Default>\n\t</Default>\n</Switch>');
+      items.push(switchItem);
+
+      const matchItem = new vscode.CompletionItem('Match', vscode.CompletionItemKind.Keyword);
+      matchItem.detail = '<Match when={...}>';
+      matchItem.insertText = new vscode.SnippetString('Match when=\"${1:case}\">\n\t$0\n</Match>');
+      items.push(matchItem);
+
+      const elseIfItem = new vscode.CompletionItem('ElseIf', vscode.CompletionItemKind.Keyword);
+      elseIfItem.detail = '<ElseIf condition={...}>';
+      elseIfItem.insertText = new vscode.SnippetString('ElseIf condition={${1:condition}}>\n\t$0\n</ElseIf>');
+      items.push(elseIfItem);
+
+      const elseItem = new vscode.CompletionItem('Else', vscode.CompletionItemKind.Keyword);
+      elseItem.detail = '<Else>';
+      elseItem.insertText = new vscode.SnippetString('Else>\n\t$0\n</Else>');
+      items.push(elseItem);
+
+      const defaultItem = new vscode.CompletionItem('Default', vscode.CompletionItemKind.Keyword);
+      defaultItem.detail = '<Default>';
+      defaultItem.insertText = new vscode.SnippetString('Default>\n\t$0\n</Default>');
+      items.push(defaultItem);
+
+      const snippets = discoverSnippets(document);
+      for (const s of Object.values(snippets)) {
+        const item = new vscode.CompletionItem(s.component, vscode.CompletionItemKind.Class);
+        item.detail = `Snippet Component (${s.snippet}.liqx)`;
+        item.documentation = new vscode.MarkdownString(s.doc);
+        const firstProp = s.props[0];
+        const insert = firstProp ? `${s.component} ${firstProp}={$1} />$0` : `${s.component} />$0`;
+        item.insertText = new vscode.SnippetString(insert);
+        items.push(item);
+      }
+
+      return items;
+    }
+
+    // 2. Inside open tag `<Tag |` -> props and class modifiers
+    const lastOpen = line.lastIndexOf('<');
+    const lastClose = line.lastIndexOf('>');
+    if (lastOpen !== -1 && (lastClose === -1 || lastClose < lastOpen)) {
+      const items = [];
+
+      // class: modifier suggestion
+      const classModItem = new vscode.CompletionItem('class:name', vscode.CompletionItemKind.Snippet);
+      classModItem.detail = 'class:modifier={condition}';
+      classModItem.documentation = new vscode.MarkdownString('Svelte-style conditional class modifier. Appends class when condition is truthy.');
+      classModItem.insertText = new vscode.SnippetString('class:${1:active}={${2:isActive}}');
+      items.push(classModItem);
+
+      const inside = line.slice(lastOpen + 1);
+      const m = /^([A-Z][\w-]*)/.exec(inside);
+      if (m) {
+        const compName = m[1];
+        const snippets = discoverSnippets(document);
+        const snippetInfo = snippets[compName];
+        if (snippetInfo && snippetInfo.props.length > 0) {
+          for (const p of snippetInfo.props) {
+            const item = new vscode.CompletionItem(p, vscode.CompletionItemKind.Field);
+            item.detail = `Component Prop (${compName})`;
+            item.insertText = new vscode.SnippetString(`${p}={$1}$0`);
+            items.push(item);
+          }
+        }
+      }
+
+      return items;
+    }
+
+    return undefined;
+  },
+};
+
 const codeProvider = {
   provideCompletionItems(document, position) {
     if (!inLiqxCode(document, position)) return undefined;
@@ -307,6 +557,7 @@ function activate(context) {
     vscode.languages.registerHoverProvider(SELECTOR, hoverProvider),
     vscode.languages.registerCompletionItemProvider(SELECTOR, filterProvider, '|', ' '),
     vscode.languages.registerCompletionItemProvider(SELECTOR, methodProvider, '.'),
+    vscode.languages.registerCompletionItemProvider(SELECTOR, componentProvider, '<', ' '),
     vscode.languages.registerCompletionItemProvider(SELECTOR, codeProvider),
   );
 }
@@ -314,3 +565,4 @@ function activate(context) {
 function deactivate() {}
 
 module.exports = { activate, deactivate };
+

@@ -94,8 +94,12 @@ final class Lexer {
 	/** In Js mode: is the next token an operand (vs. postfix)? */
 	private bool $expectOperand = true;
 
-	/** Mode the scanner was in before entering the current <tag>. */
-	private LexerMode $tagReturnMode = LexerMode::Content;
+	/** Mode stack before entering <tag>s. */
+	/** @var list<LexerMode> */
+	private array $tagReturnModeStack = [];
+
+	/** Mode to return to after a verbatim block closes. */
+	private LexerMode $verbatimReturnMode = LexerMode::Content;
 
 	/** Name of the element whose tag is being scanned. */
 	private string $currentTagName = '';
@@ -108,6 +112,8 @@ final class Lexer {
 		$this->tokens  = [];
 		$this->mode    = LexerMode::Content;
 		$this->modeStack = [];
+		$this->tagReturnModeStack = [];
+		$this->verbatimReturnMode = LexerMode::Content;
 		$this->tagStack  = [];
 		$this->jsBraceDepth = 0;
 		$this->jsBraceDepthStack = [];
@@ -264,8 +270,8 @@ final class Lexer {
 
 		$this->push( TokenType::OpenTag, '<', $this->line );
 		$this->cursor++;
-		$this->tagReturnMode = LexerMode::Content;
-		$this->mode          = LexerMode::Tag;
+		$this->tagReturnModeStack[] = LexerMode::Content;
+		$this->mode                 = LexerMode::Tag;
 	}
 
 	// ---------------------------------------------------------------------
@@ -291,7 +297,7 @@ final class Lexer {
 				$this->push( TokenType::SelfClose, '/>', $this->line );
 				$this->cursor++;
 				$this->currentTagName = '';
-				$this->mode           = $this->tagReturnMode;
+				$this->mode           = array_pop( $this->tagReturnModeStack ) ?? LexerMode::Content;
 
 				return;
 			}
@@ -307,7 +313,7 @@ final class Lexer {
 			$this->push( TokenType::SelfClose, '/>', $this->line );
 			$this->cursor += 2;
 			$this->currentTagName = '';
-			$this->mode           = $this->tagReturnMode;
+			$this->mode           = array_pop( $this->tagReturnModeStack ) ?? LexerMode::Content;
 
 			return;
 		}
@@ -338,7 +344,7 @@ final class Lexer {
 		}
 
 		if ( $this->isIdentifierStart( $char ) ) {
-			$value = $this->scanIdentifier( allowDash: true );
+			$value = $this->scanIdentifier( allowDash: true, allowColon: true );
 			$this->push( TokenType::Identifier, $value, $this->line );
 
 			if ( '' === $this->currentTagName ) {
@@ -354,11 +360,13 @@ final class Lexer {
 	private function openTagCompleted(): void {
 		$name = $this->currentTagName;
 		$this->currentTagName = '';
+		$tagReturnMode = array_pop( $this->tagReturnModeStack ) ?? LexerMode::Content;
 
 		// Verbatim block capture for <style> / <script> / <schema> — their bodies
 		// are CSS/JS, never JSX children, even when the tag sits inside a Js
 		// expression.
 		if ( in_array( $name, [ 'style', 'script', 'schema' ], true ) ) {
+			$this->verbatimReturnMode = $tagReturnMode;
 			$this->mode = match ( $name ) {
 				'style'  => LexerMode::Style,
 				'script' => LexerMode::Script,
@@ -370,7 +378,7 @@ final class Lexer {
 
 		$this->tagStack[] = [
 			'name'   => $name,
-			'fromJs' => LexerMode::Js === $this->tagReturnMode,
+			'fromJs' => LexerMode::Js === $tagReturnMode,
 		];
 		$this->mode = LexerMode::Content;
 	}
@@ -446,8 +454,8 @@ final class Lexer {
 		if ( '<' === $char && $this->expectOperand && $this->isIdentifierStart( $this->source[ $this->cursor + 1 ] ?? '' ) ) {
 			$this->push( TokenType::OpenTag, '<', $this->line );
 			$this->cursor++;
-			$this->tagReturnMode = LexerMode::Js;
-			$this->mode          = LexerMode::Tag;
+			$this->tagReturnModeStack[] = LexerMode::Js;
+			$this->mode                 = LexerMode::Tag;
 
 			return;
 		}
@@ -674,7 +682,7 @@ final class Lexer {
 
 		// Return to the mode before the block — an in-expression <script> must
 		// leave the enclosing `{…}` open, a document block resumes Content.
-		$this->mode = $this->tagReturnMode;
+		$this->mode = $this->verbatimReturnMode;
 	}
 
 	// ---------------------------------------------------------------------
@@ -817,13 +825,13 @@ final class Lexer {
 		return substr( $this->source, $start, $this->cursor - $start );
 	}
 
-	private function scanIdentifier( bool $allowDash ): string {
+	private function scanIdentifier( bool $allowDash, bool $allowColon = false ): string {
 		$start = $this->cursor;
 
 		while ( $this->cursor < $this->length ) {
 			$char = $this->source[ $this->cursor ];
 
-			if ( $this->isIdentifierStart( $char ) || $this->isDigit( $char ) || '$' === $char || ( $allowDash && '-' === $char ) ) {
+			if ( $this->isIdentifierStart( $char ) || $this->isDigit( $char ) || '$' === $char || ( $allowDash && '-' === $char ) || ( $allowColon && ':' === $char ) ) {
 				$this->cursor++;
 
 				continue;

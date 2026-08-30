@@ -776,6 +776,33 @@ final class Evaluator {
 		return ' ' . $name . '="' . $this->stringify( $value ) . '"';
 	}
 
+	/**
+	 * Resolves a base class value combined with Svelte-style boolean class modifiers.
+	 *
+	 * @param mixed $base The base class string/array/expression value, if any
+	 * @param array<string, mixed> $modifiers Map of modifier name => boolean condition
+	 */
+	public function resolveClass( mixed $base, array $modifiers ): ?string {
+		$classes = [];
+
+		if ( null !== $base && false !== $base && '' !== $base ) {
+			$baseStr = $this->stringify( $base );
+			if ( '' !== trim( $baseStr ) ) {
+				$classes[] = trim( $baseStr );
+			}
+		}
+
+		foreach ( $modifiers as $modifier => $cond ) {
+			if ( $this->truthy( $cond ) ) {
+				$classes[] = (string) $modifier;
+			}
+		}
+
+		$joined = trim( implode( ' ', $classes ) );
+
+		return '' === $joined ? null : $joined;
+	}
+
 	/** Spread `{...attrs}` — only arrays spread, and `key` is skipped. */
 	public function spreadAttrs( mixed $value ): string {
 		$out = '';
@@ -859,5 +886,46 @@ final class Evaluator {
 		}
 
 		return $out;
+	}
+
+	/**
+	 * @param array<string, mixed> $props
+	 */
+	public function renderComponent( Context $ctx, string $tag, array $props ): string {
+		return $ctx->environment->renderSnippet( $tag, $props );
+	}
+
+	public function renderSlot( Context $ctx, ?string $name, string $fallback = '' ): string {
+		$props = $ctx->get( 'props' );
+
+		if ( is_array( $props ) ) {
+			if ( null !== $name ) {
+				if ( isset( $props['slots'][ $name ] ) && '' !== $props['slots'][ $name ] && null !== $props['slots'][ $name ] ) {
+					return (string) $props['slots'][ $name ];
+				}
+			} else {
+				if ( isset( $props['children'] ) && '' !== $props['children'] && null !== $props['children'] ) {
+					return (string) $props['children'];
+				}
+			}
+		}
+
+		return $fallback;
+	}
+
+	/**
+	 * @param array<string, mixed> $props
+	 * @return array<string, mixed>
+	 */
+	public function mergeProps( array $props, mixed $spread ): array {
+		if ( is_array( $spread ) ) {
+			foreach ( $spread as $k => $v ) {
+				if ( 'key' !== $k ) {
+					$props[ $k ] = $v;
+				}
+			}
+		}
+
+		return $props;
 	}
 }

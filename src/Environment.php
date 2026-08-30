@@ -241,13 +241,53 @@ final class Environment {
 		);
 	}
 
+	/**
+	 * @param array<string, mixed> $props
+	 */
+	public function renderSnippet( string $name, array $props = [] ): string {
+		if ( null === $this->snippetFileSystem ) {
+			throw new \RuntimeException( 'No snippet file system configured' );
+		}
+
+		$candidates    = self::snippetCandidates( $name );
+		$lastException = null;
+
+		foreach ( $candidates as $candidate ) {
+			try {
+				return $this->renderPartial( $candidate, $this->snippetFileSystem, [ 'props' => $props ] );
+			} catch ( FileSystemException $e ) {
+				$lastException = $e;
+			}
+		}
+
+		throw $lastException ?? new FileSystemException( sprintf( 'Template %s not found', $name ) );
+	}
+
+	/** @return list<string> */
+	public static function snippetCandidates( string $name ): array {
+		$candidates = [];
+
+		$kebab = strtolower( (string) preg_replace( '/([a-z0-9])([A-Z])/', '$1-$2', $name ) );
+		$snake = strtolower( (string) preg_replace( '/([a-z0-9])([A-Z])/', '$1_$2', $name ) );
+		$lower = strtolower( $name );
+
+		$candidates[] = $kebab;
+		if ( $snake !== $kebab ) {
+			$candidates[] = $snake;
+		}
+		if ( $name !== $kebab && $name !== $snake ) {
+			$candidates[] = $name;
+		}
+		if ( $lower !== $kebab && $lower !== $snake && $lower !== $name ) {
+			$candidates[] = $lower;
+		}
+
+		return array_values( array_unique( $candidates ) );
+	}
+
 	private function makeRenderGlobal(): callable {
 		return function ( string $name, array $props = [] ): string {
-			if ( null === $this->snippetFileSystem ) {
-				throw new \RuntimeException( 'No snippet file system configured' );
-			}
-
-			return $this->renderPartial( $name, $this->snippetFileSystem, [ 'props' => $props ] );
+			return $this->renderSnippet( $name, $props );
 		};
 	}
 

@@ -196,22 +196,91 @@ final class Renderer {
 	}
 
 	public function renderElement( Element $element, Context $ctx ): string {
-		$attributes = '';
-
 		try {
+			if ( '' !== $element->tag ) {
+				$tagLower = strtolower( $element->tag );
+				if ( 'if' === $tagLower ) {
+					return $this->renderIfElement( $element, $ctx );
+				}
+				if ( 'show' === $tagLower ) {
+					return $this->renderShowElement( $element, $ctx );
+				}
+				if ( 'switch' === $tagLower ) {
+					return $this->renderSwitchElement( $element, $ctx );
+				}
+				if ( ctype_upper( $element->tag[0] ) ) {
+					return $this->renderComponent( $element, $ctx );
+				}
+			}
+
+			if ( 'slot' === strtolower( $element->tag ) ) {
+				return $this->renderSlotElement( $element, $ctx );
+			}
+
+			$attributes = '';
+			$classBase = null;
+			$classModifiers = [];
+			$hasModifiers = false;
+
 			foreach ( $element->attrs as $attr ) {
-				if ( null === $attr['name'] ) {
+				$name = $attr['name'];
+				if ( null !== $name && str_starts_with( $name, 'class:' ) ) {
+					$hasModifiers = true;
+					$modifier = substr( $name, 6 );
+					$val = null === $attr['value'] ? true : $this->evaluator->evaluate( $attr['value'], $ctx );
+					$classModifiers[ $modifier ] = $val;
+				} elseif ( 'class' === $name ) {
+					$classBase = null === $attr['value'] ? true : $this->evaluator->evaluate( $attr['value'], $ctx );
+				}
+			}
+
+			$classHandled = false;
+
+			foreach ( $element->attrs as $attr ) {
+				$name = $attr['name'];
+
+				if ( null !== $name && ( 'class' === $name || str_starts_with( $name, 'class:' ) ) ) {
+					if ( $classHandled ) {
+						continue;
+					}
+					$classHandled = true;
+
+					if ( $hasModifiers ) {
+						$resolvedClass = $this->evaluator->resolveClass( $classBase, $classModifiers );
+						if ( null !== $resolvedClass ) {
+							$attributes .= ' class="' . htmlspecialchars( $resolvedClass, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8' ) . '"';
+						}
+						continue;
+					}
+
+					if ( null === $attr['value'] ) {
+						$attributes .= ' class';
+						continue;
+					}
+					$v = $classBase;
+					if ( true === $v ) {
+						$attributes .= ' class';
+						continue;
+					}
+					if ( false === $v || null === $v ) {
+						continue;
+					}
+					$attributes .= ' class="' . $this->stringify( $v ) . '"';
+					continue;
+				}
+
+				if ( null === $name ) {
 					// `{...expr}` (spread) or raw attribute-string injection.
 					$value = $this->evaluator->evaluate( $attr['value'], $ctx );
 
 					if ( $attr['spread'] ) {
 						if ( is_array( $value ) ) {
-							foreach ( $value as $name => $v ) {
-								if ( 'key' === $name ) {
+							foreach ( $value as $n => $v ) {
+								if ( 'key' === $n ) {
 									continue;
 								}
 
-								$attributes .= ' ' . $name . '="' . $this->stringify( $v ) . '"';
+								$attributes .= ' ' . $n . '="' . $this->stringify( $v ) . '"';
 							}
 						}
 
@@ -223,14 +292,14 @@ final class Renderer {
 					continue;
 				}
 
-				if ( 'key' === $attr['name'] ) {
+				if ( 'key' === $name ) {
 					continue;
 				}
 
 				$value = $attr['value'];
 
 				if ( null === $value ) {
-					$attributes .= ' ' . $attr['name'];
+					$attributes .= ' ' . $name;
 
 					continue;
 				}
@@ -238,7 +307,7 @@ final class Renderer {
 				$v = $this->evaluator->evaluate( $value, $ctx );
 
 				if ( true === $v ) {
-					$attributes .= ' ' . $attr['name'];
+					$attributes .= ' ' . $name;
 
 					continue;
 				}
@@ -247,7 +316,7 @@ final class Renderer {
 					continue;
 				}
 
-				$attributes .= ' ' . $attr['name'] . '="' . $this->stringify( $v ) . '"';
+				$attributes .= ' ' . $name . '="' . $this->stringify( $v ) . '"';
 			}
 
 			if ( $element->selfClosing ) {
@@ -270,6 +339,121 @@ final class Renderer {
 
 			throw $e;
 		}
+	}
+
+	public function renderComponent( Element $element, Context $ctx ): string {
+		$props = [];
+		$classBase = null;
+		$hasClassBase = false;
+		$classModifiers = [];
+
+		foreach ( $element->attrs as $attr ) {
+			if ( null === $attr['name'] ) {
+				if ( $attr['spread'] ) {
+					$value = $this->evaluator->evaluate( $attr['value'], $ctx );
+					$props = $this->evaluator->mergeProps( $props, $value );
+				}
+				continue;
+			}
+
+			if ( 'key' === $attr['name'] ) {
+				continue;
+			}
+
+			if ( str_starts_with( $attr['name'], 'class:' ) ) {
+				$modifier = substr( $attr['name'], 6 );
+				$classModifiers[ $modifier ] = null === $attr['value'] ? true : $this->evaluator->evaluate( $attr['value'], $ctx );
+				continue;
+			}
+
+			if ( 'class' === $attr['name'] ) {
+				$hasClassBase = true;
+				$classBase = null === $attr['value'] ? true : $this->evaluator->evaluate( $attr['value'], $ctx );
+				continue;
+			}
+
+			$props[ $attr['name'] ] = null === $attr['value']
+				? true
+				: $this->evaluator->evaluate( $attr['value'], $ctx );
+		}
+
+		if ( $hasClassBase || [] !== $classModifiers ) {
+			if ( ! $hasClassBase && isset( $props['class'] ) ) {
+				$classBase = $props['class'];
+			}
+			$resolvedClass = $this->evaluator->resolveClass( $classBase, $classModifiers );
+			if ( null !== $resolvedClass ) {
+				$props['class'] = $resolvedClass;
+			}
+		}
+
+		$slots           = [];
+		$childrenNodes   = [];
+		$defaultChildren = '';
+
+		if ( ! $element->selfClosing ) {
+			foreach ( $element->children as $child ) {
+				if ( $child instanceof Element && 'template' === strtolower( $child->tag ) ) {
+					$slotName = null;
+					foreach ( $child->attrs as $a ) {
+						if ( 'slot' === $a['name'] ) {
+							if ( null === $a['value'] ) {
+								$slotName = 'default';
+							} else {
+								$slotName = (string) $this->evaluator->evaluate( $a['value'], $ctx );
+							}
+							break;
+						}
+					}
+
+					if ( null !== $slotName ) {
+						if ( [] !== $childrenNodes ) {
+							$lastIdx = count( $childrenNodes ) - 1;
+							if ( $childrenNodes[ $lastIdx ] instanceof Text && '' === trim( $childrenNodes[ $lastIdx ]->value ) ) {
+								array_pop( $childrenNodes );
+							}
+						}
+
+						$slotContent = '';
+						foreach ( $child->children as $slotChild ) {
+							$slotContent .= $this->renderNode( $slotChild, $ctx );
+						}
+						$slots[ $slotName ] = $slotContent;
+						continue;
+					}
+				}
+
+				$childrenNodes[] = $child;
+			}
+		}
+
+		$defaultChildren = '';
+		foreach ( $childrenNodes as $cNode ) {
+			$defaultChildren .= $this->renderNode( $cNode, $ctx );
+		}
+
+		$props['children'] = $element->selfClosing ? null : $defaultChildren;
+		$props['slots']    = $slots;
+
+		return $ctx->environment->renderSnippet( $element->tag, $props );
+	}
+
+	public function renderSlotElement( Element $element, Context $ctx ): string {
+		$slotName = null;
+
+		foreach ( $element->attrs as $attr ) {
+			if ( 'name' === $attr['name'] ) {
+				$slotName = null === $attr['value'] ? '' : (string) $this->evaluator->evaluate( $attr['value'], $ctx );
+				break;
+			}
+		}
+
+		$fallback = '';
+		foreach ( $element->children as $child ) {
+			$fallback .= $this->renderNode( $child, $ctx );
+		}
+
+		return $this->evaluator->renderSlot( $ctx, $slotName, $fallback );
 	}
 
 	public function renderValue( mixed $value, Context $ctx ): string {
@@ -377,5 +561,189 @@ final class Renderer {
 		}
 
 		return (string) $value;
+	}
+
+	public function renderIfElement( Element $element, Context $ctx ): string {
+		$cond = $this->evalConditionAttr( $element, $ctx );
+		if ( $this->evaluator->truthy( $cond ) ) {
+			$out = '';
+			foreach ( $element->children as $child ) {
+				if ( $child instanceof Element ) {
+					$childTag = strtolower( $child->tag );
+					if ( 'elseif' === $childTag || 'else' === $childTag ) {
+						break;
+					}
+				}
+				$out .= $this->renderNode( $child, $ctx );
+			}
+			return $out;
+		}
+
+		// Main If was falsy, search ElseIf and Else branches
+		foreach ( $element->children as $child ) {
+			if ( $child instanceof Element ) {
+				$childTag = strtolower( $child->tag );
+				if ( 'elseif' === $childTag ) {
+					$elseIfCond = $this->evalConditionAttr( $child, $ctx );
+					if ( $this->evaluator->truthy( $elseIfCond ) ) {
+						$out = '';
+						foreach ( $child->children as $c ) {
+							$out .= $this->renderNode( $c, $ctx );
+						}
+						return $out;
+					}
+				} elseif ( 'else' === $childTag ) {
+					$out = '';
+					foreach ( $child->children as $c ) {
+						$out .= $this->renderNode( $c, $ctx );
+					}
+					return $out;
+				}
+			}
+		}
+
+		return '';
+	}
+
+	public function renderShowElement( Element $element, Context $ctx ): string {
+		$when = $this->evalConditionAttr( $element, $ctx, [ 'when', 'condition', 'cond', 'is' ] );
+		$fallbackAttrExpr = null;
+		foreach ( $element->attrs as $attr ) {
+			if ( 'fallback' === $attr['name'] ) {
+				$fallbackAttrExpr = $attr['value'];
+				break;
+			}
+		}
+
+		$mainChildren = [];
+		$fallbackSlotChildren = null;
+
+		foreach ( $element->children as $child ) {
+			if ( $child instanceof Element ) {
+				$tagLower = strtolower( $child->tag );
+				if ( 'template' === $tagLower ) {
+					$isFallbackSlot = false;
+					foreach ( $child->attrs as $a ) {
+						if ( 'slot' === $a['name'] && 'fallback' === ( null === $a['value'] ? '' : (string) $this->evaluator->evaluate( $a['value'], $ctx ) ) ) {
+							$isFallbackSlot = true;
+							break;
+						}
+					}
+					if ( $isFallbackSlot ) {
+						$fallbackSlotChildren = $child->children;
+						continue;
+					}
+				} elseif ( 'fallback' === $tagLower ) {
+					$fallbackSlotChildren = $child->children;
+					continue;
+				}
+			}
+			$mainChildren[] = $child;
+		}
+
+		if ( $this->evaluator->truthy( $when ) ) {
+			$out = '';
+			foreach ( $mainChildren as $c ) {
+				$out .= $this->renderNode( $c, $ctx );
+			}
+			return $out;
+		}
+
+		if ( null !== $fallbackSlotChildren ) {
+			$out = '';
+			foreach ( $fallbackSlotChildren as $c ) {
+				$out .= $this->renderNode( $c, $ctx );
+			}
+			return $out;
+		}
+
+		if ( null !== $fallbackAttrExpr ) {
+			return $this->renderValue( $this->evaluator->evaluate( $fallbackAttrExpr, $ctx ), $ctx );
+		}
+
+		return '';
+	}
+
+	public function renderSwitchElement( Element $element, Context $ctx ): string {
+		$hasTarget = false;
+		$targetVal = null;
+		foreach ( $element->attrs as $attr ) {
+			if ( 'value' === $attr['name'] || 'val' === $attr['name'] ) {
+				$hasTarget = true;
+				$targetVal = null === $attr['value'] ? true : $this->evaluator->evaluate( $attr['value'], $ctx );
+				break;
+			}
+		}
+
+		$defaultChildren = null;
+
+		foreach ( $element->children as $child ) {
+			if ( $child instanceof Element ) {
+				$tagLower = strtolower( $child->tag );
+				if ( 'match' === $tagLower ) {
+					$isDefault = false;
+					$matchVal = null;
+					$hasMatchVal = false;
+					foreach ( $child->attrs as $a ) {
+						if ( 'default' === $a['name'] ) {
+							$isDefault = true;
+							break;
+						}
+						if ( 'when' === $a['name'] || 'value' === $a['name'] || 'val' === $a['name'] || 'is' === $a['name'] ) {
+							$hasMatchVal = true;
+							$matchVal = null === $a['value'] ? true : $this->evaluator->evaluate( $a['value'], $ctx );
+							break;
+						}
+					}
+
+					if ( $isDefault ) {
+						$defaultChildren = $child->children;
+						continue;
+					}
+
+					if ( $hasTarget ) {
+						if ( $hasMatchVal && $this->evaluator->looseEqual( $targetVal, $matchVal ) ) {
+							$out = '';
+							foreach ( $child->children as $c ) {
+								$out .= $this->renderNode( $c, $ctx );
+							}
+							return $out;
+						}
+					} else {
+						if ( $hasMatchVal && $this->evaluator->truthy( $matchVal ) ) {
+							$out = '';
+							foreach ( $child->children as $c ) {
+								$out .= $this->renderNode( $c, $ctx );
+							}
+							return $out;
+						}
+					}
+				} elseif ( 'default' === $tagLower ) {
+					$defaultChildren = $child->children;
+				}
+			}
+		}
+
+		if ( null !== $defaultChildren ) {
+			$out = '';
+			foreach ( $defaultChildren as $c ) {
+				$out .= $this->renderNode( $c, $ctx );
+			}
+			return $out;
+		}
+
+		return '';
+	}
+
+	private function evalConditionAttr( Element $element, Context $ctx, array $candidates = [ 'condition', 'cond', 'when', 'is' ] ): mixed {
+		foreach ( $element->attrs as $attr ) {
+			if ( null !== $attr['name'] && in_array( strtolower( $attr['name'] ), $candidates, true ) ) {
+				return null === $attr['value'] ? true : $this->evaluator->evaluate( $attr['value'], $ctx );
+			}
+		}
+		if ( isset( $element->attrs[0] ) && null === $element->attrs[0]['name'] && ! $element->attrs[0]['spread'] ) {
+			return $this->evaluator->evaluate( $element->attrs[0]['value'], $ctx );
+		}
+		return false;
 	}
 }

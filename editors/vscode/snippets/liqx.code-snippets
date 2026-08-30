@@ -59,6 +59,61 @@
     "body": ["{render(\"${1:name}\", { $2 })}$0"],
     "description": "Render a named snippet with props"
   },
+  "Component snippet": {
+    "prefix": "comp",
+    "body": ["<${1:ProductCard} ${2:product={item\\}} />$0"],
+    "description": "Render a snippet component"
+  },
+  "Component with children": {
+    "prefix": "compchild",
+    "body": ["<${1:Card}>", "\t$0", "</${1:Card}>"],
+    "description": "Render a component with children/slots"
+  },
+  "Class modifier": {
+    "prefix": "classmod",
+    "body": ["class:${1:active}={${2:isActive}}"],
+    "description": "Svelte-style conditional class modifier"
+  },
+  "If condition": {
+    "prefix": "if",
+    "body": ["<If condition={${1:condition}}>", "\t$0", "</If>"],
+    "description": "Conditional block component"
+  },
+  "If-Else": {
+    "prefix": "ifelse",
+    "body": [
+      "<If condition={${1:condition}}>",
+      "\t${2:then}",
+      "<Else>",
+      "\t${3:else}",
+      "</Else>",
+      "</If>"
+    ],
+    "description": "If-Else block component"
+  },
+  "Show": {
+    "prefix": "show",
+    "body": ["<Show when={${1:condition}}>", "\t$0", "</Show>"],
+    "description": "Show component with optional fallback"
+  },
+  "Switch pattern matching": {
+    "prefix": "switch",
+    "body": [
+      "<Switch value={${1:value}}>",
+      "\t<Match when=\"${2:case}\">",
+      "\t\t$0",
+      "\t</Match>",
+      "\t<Default>",
+      "\t</Default>",
+      "</Switch>"
+    ],
+    "description": "Switch pattern-matching component"
+  },
+  "Match branch": {
+    "prefix": "match",
+    "body": ["<Match when=\"${1:case}\">", "\t$0", "</Match>"],
+    "description": "Match branch for Switch"
+  },
   "section": {
     "prefix": "section",
     "body": ["{section(\"${1:name}\")}$0"],

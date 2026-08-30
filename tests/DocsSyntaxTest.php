@@ -75,8 +75,13 @@ final class DocsSyntaxTest extends TestCase {
 			$environment->registerFilter( $hostFilter, static fn ( mixed $value ): mixed => $value );
 		}
 
-		// The docs reference `render()`/`section()`; stub both so a snippet that
+		// The docs reference `render()`/`section()` and `<Component />`; stub them so a snippet that
 		// composes does not need a real filesystem.
+		$environment->setSnippetFileSystem( new class implements \Phpmystic\Liqx\FileSystem {
+			public function load( string $name ): string {
+				return '<div>{props.children}</div>';
+			}
+		} );
 		$environment->registerGlobal( 'render', static fn ( string $name, array $props = [] ): string => '' );
 		$environment->registerGlobal( 'section', static fn ( string $name ): string => '' );
 
@@ -183,8 +188,9 @@ final class DocsSyntaxTest extends TestCase {
 			'article'   => [ 'published_at' => 0 ],
 			'rows'      => [ [ 'label' => 'L' ] ],
 			'maybe'     => [ 'items' => [] ],
-			'attrs'     => [ 'class' => 'c' ],
-			'product'   => $product,
+			'attrs'      => [ 'class' => 'c' ],
+			'modalAttrs' => [ 'class' => 'm' ],
+			'product'    => $product,
 			'featured'  => $product,
 			'products'  => [ $product + [ 'tags' => [ 'featured' ] ] ],
 			'items'     => [ [ 'id' => 1, 'name' => 'n', 'active' => true, 'title' => 'Watch', 'url' => '/x', 'inStock' => true ] ],

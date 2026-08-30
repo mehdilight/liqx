@@ -2,7 +2,83 @@
 
 There are **no** `{% if %}` / `{% for %}` tags. Use JS expressions.
 
-## Conditional rendering
+## First-Class Control Flow Components
+
+Liqx provides built-in control flow components (`<If>`, `<Show>`, `<Switch>`) for clean, expressive branching without nested ternaries.
+
+### 1. `<If>`, `<ElseIf>`, `<Else>`
+
+```liqx
+<If condition={status === 'delivered'}>
+  <span class="badge badge--success">Delivered</span>
+  <ElseIf condition={status === 'shipped'}>
+    <span class="badge badge--info">In transit</span>
+  </ElseIf>
+  <ElseIf condition={status === 'confirmed'}>
+    <span class="badge badge--primary">Confirmed</span>
+  </ElseIf>
+  <Else>
+    <span class="badge badge--neutral">Pending</span>
+  </Else>
+</If>
+```
+
+* Attributes: `condition={expr}`, `cond={expr}`, or `when={expr}`.
+* `<ElseIf>` and `<Else>` are evaluated in order; the first truthy branch renders its children.
+
+### 2. `<Show when={...} fallback={...}>`
+
+Ideal for binary conditional toggles with large blocks or fallback content:
+
+```liqx
+<Show when={customer.logged_in} fallback={<a href={routes.login_url}>Log in</a>}>
+  <div class="account-badge">
+    <span>Welcome, {customer.name}</span>
+  </div>
+</Show>
+```
+
+Fallback content can also be supplied via named slot `<template slot="fallback">`:
+
+```liqx
+<Show when={cart.count > 0}>
+  <CartItems items={cart.items} />
+  <template slot="fallback">
+    <p class="empty-cart">Your cart is empty.</p>
+  </template>
+</Show>
+```
+
+### 3. `<Switch>` & `<Match>` (Pattern Matching)
+
+#### Value-Based Matching:
+```liqx
+<Switch value={block.type}>
+  <Match when="heading">
+    <h2>{block.settings.text}</h2>
+  </Match>
+  <Match when="button">
+    <a href={block.settings.url} class="btn">{block.settings.label}</a>
+  </Match>
+  <Default>
+    <p>Unknown block</p>
+  </Default>
+</Switch>
+```
+
+#### Boolean Condition Matching:
+```liqx
+<Switch>
+  <Match when={score >= 90}><b>Grade A</b></Match>
+  <Match when={score >= 75}><b>Grade B</b></Match>
+  <Match when={score >= 50}><b>Grade C</b></Match>
+  <Default><b>Fail</b></Default>
+</Switch>
+```
+
+## Expression-Level Conditionals (`&&`, `||`, `? :`)
+
+For compact inline rendering inside `{ }`:
 
 ```liqx
 {show && <p>Visible when truthy</p>}
@@ -15,15 +91,6 @@ There are **no** `{% if %}` / `{% for %}` tags. Use JS expressions.
 
 * `a && b` → `b` if `a` is truthy, else `a`.
 * `a || b` → `a` if truthy, else `b`.
-* Chain ternaries for multi-branch:
-
-```liqx
-{block.type === 'text'
-  ? <p>{block.text}</p>
-  : block.type === 'image'
-    ? <img src={block.src} />
-    : null}
-```
 
 ## Truthiness
 

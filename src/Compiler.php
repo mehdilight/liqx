@@ -599,6 +599,26 @@ final class Compiler {
 	}
 
 	private function element( Element $element ): string {
+		if ( '' !== $element->tag ) {
+			$tagLower = strtolower( $element->tag );
+			if ( 'if' === $tagLower ) {
+				return $this->compileIf( $element );
+			}
+			if ( 'show' === $tagLower ) {
+				return $this->compileShow( $element );
+			}
+			if ( 'switch' === $tagLower ) {
+				return $this->compileSwitch( $element );
+			}
+			if ( ctype_upper( $element->tag[0] ) ) {
+				return $this->component( $element );
+			}
+		}
+
+		if ( 'slot' === strtolower( $element->tag ) ) {
+			return $this->slot( $element );
+		}
+
 		$tag = var_export( $element->tag, true );
 
 		if ( $element->selfClosing ) {
@@ -612,14 +632,334 @@ final class Compiler {
 		return "( '<' . {$tag} . " . $this->attrs( $element->attrs ) . " . '>' . " . $this->children( $element->children ) . " . '</' . {$tag} . '>' )";
 	}
 
+	private function compileIf( Element $element ): string {
+		$mainCondCode = $this->compileConditionAttr( $element );
+
+		$mainChildren = [];
+		$elseIfBranches = [];
+		$elseChildren = null;
+
+		foreach ( $element->children as $child ) {
+			if ( $child instanceof Element ) {
+				$tagLower = strtolower( $child->tag );
+				if ( 'elseif' === $tagLower ) {
+					$elseIfBranches[] = [
+						'cond' => $this->compileConditionAttr( $child ),
+						'children' => $child->children,
+					];
+					continue;
+				}
+				if ( 'else' === $tagLower ) {
+					$elseChildren = $child->children;
+					continue;
+				}
+			}
+			if ( [] === $elseIfBranches && null === $elseChildren ) {
+				$mainChildren[] = $child;
+			}
+		}
+
+		$fallbackCode = null !== $elseChildren ? $this->children( $elseChildren ) : "''";
+
+		for ( $i = count( $elseIfBranches ) - 1; $i >= 0; $i-- ) {
+			$branch = $elseIfBranches[ $i ];
+			$fallbackCode = "( \$eval->truthy( {$branch['cond']} ) ? {$this->children( $branch['children'] )} : {$fallbackCode} )";
+		}
+
+		return "( \$eval->truthy( {$mainCondCode} ) ? {$this->children( $mainChildren )} : {$fallbackCode} )";
+	}
+
+	private function compileShow( Element $element ): string {
+		$whenCode = $this->compileConditionAttr( $element, [ 'when', 'condition', 'cond', 'is' ] );
+
+		$fallbackAttrCode = null;
+		foreach ( $element->attrs as $attr ) {
+			if ( 'fallback' === $attr['name'] ) {
+				$fallbackAttrCode = null === $attr['value'] ? "''" : $this->outputValue( $attr['value'] );
+				break;
+			}
+		}
+
+		$mainChildren = [];
+		$fallbackSlotChildren = null;
+
+		foreach ( $element->children as $child ) {
+			if ( $child instanceof Element ) {
+				$tagLower = strtolower( $child->tag );
+				if ( 'template' === $tagLower ) {
+					$isFallbackSlot = false;
+					foreach ( $child->attrs as $a ) {
+						if ( 'slot' === $a['name'] ) {
+							$valStr = null === $a['value'] ? 'default' : ( $a['value'] instanceof Literal ? (string) $a['value']->value : null );
+							if ( 'fallback' === $valStr ) {
+								$isFallbackSlot = true;
+								break;
+							}
+						}
+					}
+					if ( $isFallbackSlot ) {
+						$fallbackSlotChildren = $child->children;
+						continue;
+					}
+				} elseif ( 'fallback' === $tagLower ) {
+					$fallbackSlotChildren = $child->children;
+					continue;
+				}
+			}
+			$mainChildren[] = $child;
+		}
+
+		if ( null !== $fallbackSlotChildren ) {
+			$fallbackCode = $this->children( $fallbackSlotChildren );
+		} elseif ( null !== $fallbackAttrCode ) {
+			$fallbackCode = $fallbackAttrCode;
+		} else {
+			$fallbackCode = "''";
+		}
+
+		return "( \$eval->truthy( {$whenCode} ) ? {$this->children( $mainChildren )} : {$fallbackCode} )";
+	}
+
+	private function compileSwitch( Element $element ): string {
+		$hasTarget = false;
+		$targetCode = null;
+		foreach ( $element->attrs as $attr ) {
+			if ( 'value' === $attr['name'] || 'val' === $attr['name'] ) {
+				$hasTarget = true;
+				$targetCode = null === $attr['value'] ? 'true' : $this->expr( $attr['value'], false );
+				break;
+			}
+		}
+
+		$defaultChildren = null;
+		$matches = [];
+
+		foreach ( $element->children as $child ) {
+			if ( $child instanceof Element ) {
+				$tagLower = strtolower( $child->tag );
+				if ( 'match' === $tagLower ) {
+					$isDefault = false;
+					$matchValCode = null;
+					$hasMatchVal = false;
+					foreach ( $child->attrs as $a ) {
+						if ( 'default' === $a['name'] ) {
+							$isDefault = true;
+							break;
+						}
+						if ( 'when' === $a['name'] || 'value' === $a['name'] || 'val' === $a['name'] || 'is' === $a['name'] ) {
+							$hasMatchVal = true;
+							$matchValCode = null === $a['value'] ? 'true' : $this->expr( $a['value'], false );
+							break;
+						}
+					}
+
+					if ( $isDefault ) {
+						$defaultChildren = $child->children;
+						continue;
+					}
+
+					if ( $hasMatchVal ) {
+						if ( $hasTarget ) {
+							$condCode = "\$eval->looseEqual( {$targetCode}, {$matchValCode} )";
+						} else {
+							$condCode = "\$eval->truthy( {$matchValCode} )";
+						}
+						$matches[] = [
+							'cond' => $condCode,
+							'children' => $child->children,
+						];
+					}
+				} elseif ( 'default' === $tagLower ) {
+					$defaultChildren = $child->children;
+				}
+			}
+		}
+
+		$fallbackCode = null !== $defaultChildren ? $this->children( $defaultChildren ) : "''";
+
+		for ( $i = count( $matches ) - 1; $i >= 0; $i-- ) {
+			$m = $matches[ $i ];
+			$fallbackCode = "( {$m['cond']} ? {$this->children( $m['children'] )} : {$fallbackCode} )";
+		}
+
+		return $fallbackCode;
+	}
+
+	private function compileConditionAttr( Element $element, array $candidates = [ 'condition', 'cond', 'when', 'is' ] ): string {
+		foreach ( $element->attrs as $attr ) {
+			if ( null !== $attr['name'] && in_array( strtolower( $attr['name'] ), $candidates, true ) ) {
+				return null === $attr['value'] ? 'true' : $this->expr( $attr['value'], false );
+			}
+		}
+		if ( isset( $element->attrs[0] ) && null === $element->attrs[0]['name'] && ! $element->attrs[0]['spread'] ) {
+			return $this->expr( $element->attrs[0]['value'], false );
+		}
+		return 'false';
+	}
+
+	private function component( Element $element ): string {
+		$propsInit      = [];
+		$chunks         = [];
+		$classBaseExpr  = null;
+		$hasClassBase   = false;
+		$classModifiers = [];
+
+		foreach ( $element->attrs as $attr ) {
+			if ( null === $attr['name'] ) {
+				if ( $attr['spread'] ) {
+					if ( [] !== $propsInit ) {
+						$chunks[]  = '[' . implode( ', ', $propsInit ) . ']';
+						$propsInit = [];
+					}
+					$chunks[] = $this->expr( $attr['value'], false );
+				}
+				continue;
+			}
+
+			if ( 'key' === $attr['name'] ) {
+				continue;
+			}
+
+			if ( str_starts_with( $attr['name'], 'class:' ) ) {
+				$modifier         = substr( $attr['name'], 6 );
+				$valCode          = null === $attr['value'] ? 'true' : $this->expr( $attr['value'], false );
+				$classModifiers[] = var_export( $modifier, true ) . ' => ' . $valCode;
+				continue;
+			}
+
+			if ( 'class' === $attr['name'] ) {
+				$hasClassBase  = true;
+				$classBaseExpr = null === $attr['value'] ? 'true' : $this->expr( $attr['value'], false );
+				continue;
+			}
+
+			$val         = null === $attr['value'] ? 'true' : $this->expr( $attr['value'], false );
+			$propsInit[] = var_export( $attr['name'], true ) . ' => ' . $val;
+		}
+
+		if ( $hasClassBase || [] !== $classModifiers ) {
+			$baseCode     = null === $classBaseExpr ? 'null' : $classBaseExpr;
+			$modArrayCode = '[' . implode( ', ', $classModifiers ) . ']';
+			$propsInit[]  = "'class' => \$eval->resolveClass( " . $baseCode . ', ' . $modArrayCode . ' )';
+		}
+
+		if ( [] !== $propsInit ) {
+			$chunks[] = '[' . implode( ', ', $propsInit ) . ']';
+		}
+
+		$slotsCode     = [];
+		$childrenNodes = [];
+
+		if ( ! $element->selfClosing ) {
+			foreach ( $element->children as $child ) {
+				if ( $child instanceof Element && 'template' === strtolower( $child->tag ) ) {
+					$slotName = null;
+					$slotExpr = null;
+					foreach ( $child->attrs as $a ) {
+						if ( 'slot' === $a['name'] ) {
+							if ( null === $a['value'] ) {
+								$slotName = 'default';
+							} else {
+								$slotExpr = $this->expr( $a['value'], false );
+							}
+							break;
+						}
+					}
+
+					if ( null !== $slotName || null !== $slotExpr ) {
+						if ( [] !== $childrenNodes ) {
+							$lastIdx = count( $childrenNodes ) - 1;
+							if ( $childrenNodes[ $lastIdx ] instanceof Text && '' === trim( $childrenNodes[ $lastIdx ]->value ) ) {
+								array_pop( $childrenNodes );
+							}
+						}
+
+						$slotContentCode = $this->children( $child->children );
+						if ( null !== $slotName ) {
+							$slotsCode[] = var_export( $slotName, true ) . ' => ' . $slotContentCode;
+						} else {
+							$slotsCode[] = '(string) ' . $slotExpr . ' => ' . $slotContentCode;
+						}
+						continue;
+					}
+				}
+
+				$childrenNodes[] = $child;
+			}
+		}
+
+		$childrenCode   = $element->selfClosing ? 'null' : $this->children( $childrenNodes );
+		$slotsArrayCode = [] === $slotsCode ? '[]' : '[' . implode( ', ', $slotsCode ) . ']';
+
+		$slotAndChildrenChunk = '[ \'children\' => ' . $childrenCode . ', \'slots\' => ' . $slotsArrayCode . ' ]';
+
+		if ( [] === $chunks ) {
+			$finalPropsCode = $slotAndChildrenChunk;
+		} else {
+			$propsCode = '[]';
+			foreach ( $chunks as $chunk ) {
+				$propsCode = '$eval->mergeProps( ' . $propsCode . ', ' . $chunk . ' )';
+			}
+			$finalPropsCode = '$eval->mergeProps( ' . $propsCode . ', ' . $slotAndChildrenChunk . ' )';
+		}
+
+		return '( $eval->renderComponent( $ctx, ' . var_export( $element->tag, true ) . ', ' . $finalPropsCode . ' ) )';
+	}
+
+	private function slot( Element $element ): string {
+		$nameExpr = 'null';
+
+		foreach ( $element->attrs as $attr ) {
+			if ( 'name' === $attr['name'] ) {
+				$nameExpr = null === $attr['value'] ? "''" : '(string) ' . $this->expr( $attr['value'], false );
+				break;
+			}
+		}
+
+		$fallback = $this->children( $element->children );
+
+		return '( $eval->renderSlot( $ctx, ' . $nameExpr . ', ' . $fallback . ' ) )';
+	}
+
 	/**
 	 * @param list<array{name:string|null, value:Expr|null, spread:bool}> $attrs
 	 */
 	private function attrs( array $attrs ): string {
-		$parts = [];
+		$parts          = [];
+		$classBase      = null;
+		$classModifiers = [];
+		$hasModifiers   = false;
+
+		foreach ( $attrs as $attr ) {
+			$name = $attr['name'];
+			if ( null !== $name && str_starts_with( $name, 'class:' ) ) {
+				$hasModifiers     = true;
+				$modifier         = substr( $name, 6 );
+				$valCode          = null === $attr['value'] ? 'true' : $this->expr( $attr['value'], false );
+				$classModifiers[] = var_export( $modifier, true ) . ' => ' . $valCode;
+			} elseif ( 'class' === $name ) {
+				$classBase = $attr['value'];
+			}
+		}
+
+		$classHandled = false;
 
 		foreach ( $attrs as $attr ) {
 			[ 'name' => $name, 'value' => $value, 'spread' => $spread ] = $attr;
+
+			if ( null !== $name && ( 'class' === $name || str_starts_with( $name, 'class:' ) ) ) {
+				if ( $classHandled ) {
+					continue;
+				}
+				$classHandled = true;
+
+				if ( $hasModifiers ) {
+					$baseCode     = null === $classBase ? 'null' : $this->expr( $classBase, false );
+					$modArrayCode = '[' . implode( ', ', $classModifiers ) . ']';
+					$parts[]      = '$eval->attribute( \'class\', $eval->resolveClass( ' . $baseCode . ', ' . $modArrayCode . ' ) )';
+					continue;
+				}
+			}
 
 			if ( null === $name ) {
 				if ( null === $value ) {
