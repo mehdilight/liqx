@@ -129,53 +129,6 @@ LIQX;
 	}
 
 	// ---------------------------------------------------------------------
-	// Feature 2: Runes ($props(), $slots, $context)
-	// ---------------------------------------------------------------------
-
-	public function testPropsRuneWithDestructureAndDefaults(): void {
-		$source = <<<'LIQX'
----
-const { title, size = 'md', inStock = true } = $props();
----
-<template>
-  <span class={`badge badge--${size}`} class:out-of-stock={!inStock}>{title}</span>
-</template>
-LIQX;
-
-		$this->assertSame(
-			'<span class="badge badge--lg">Sale</span>',
-			trim( $this->render( $source, [ 'props' => [ 'title' => 'Sale', 'size' => 'lg' ] ] ) )
-		);
-
-		$this->assertSame(
-			'<span class="badge badge--md out-of-stock">Sold Out</span>',
-			trim( $this->render( $source, [ 'props' => [ 'title' => 'Sold Out', 'inStock' => false ] ] ) )
-		);
-	}
-
-	public function testSlotsAndContextRunes(): void {
-		$source = <<<'LIQX'
----
-const hasHeader = $slots.header != null;
-const currentUrl = $context.request_url;
----
-<template>
-  <div><If condition={hasHeader}><header>Has Header</header></If><p>{currentUrl}</p></div>
-</template>
-LIQX;
-
-		$this->assertSame(
-			"<div><p>/catalog</p></div>",
-			trim( $this->render( $source, [ 'request_url' => '/catalog', '$slots' => [] ] ) )
-		);
-
-		$this->assertSame(
-			"<div><header>Has Header</header><p>/catalog</p></div>",
-			trim( $this->render( $source, [ 'request_url' => '/catalog', '$slots' => [ 'header' => '<h1>Header</h1>' ] ] ) )
-		);
-	}
-
-	// ---------------------------------------------------------------------
 	// Feature 5: Local Functions & Block-body Arrow Helpers
 	// ---------------------------------------------------------------------
 

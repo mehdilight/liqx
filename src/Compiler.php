@@ -1333,18 +1333,6 @@ final class Compiler {
 		}
 
 		if ( $expression instanceof Identifier ) {
-			if ( '$props' === $expression->name ) {
-				return '( $ctx->get( \'props\' ) ?? [] )';
-			}
-
-			if ( '$slots' === $expression->name ) {
-				return '( $ctx->get( \'$slots\' ) ?? $ctx->get( \'slots\' ) ?? [] )';
-			}
-
-			if ( '$context' === $expression->name ) {
-				return '( $ctx->all() )';
-			}
-
 			$resolved = $this->resolveBound( $expression->name );
 
 			if ( null !== $resolved ) {

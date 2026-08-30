@@ -134,18 +134,6 @@ final class Evaluator {
 
 	/** Strict-aware identifier lookup — shared by the interpreter and compiled templates. */
 	public function identifier( Context $ctx, string $name ): mixed {
-		if ( '$props' === $name ) {
-			return $ctx->get( 'props' ) ?? [];
-		}
-
-		if ( '$slots' === $name ) {
-			return $ctx->get( '$slots' ) ?? $ctx->get( 'slots' ) ?? [];
-		}
-
-		if ( '$context' === $name ) {
-			return $ctx->all();
-		}
-
 		if ( ! $ctx->strict ) {
 			return $ctx->get( $name );
 		}
@@ -231,18 +219,6 @@ final class Evaluator {
 	 * @param list<mixed> $args
 	 */
 	public function callNamed( Context $ctx, string $name, array $args ): mixed {
-		if ( '$props' === $name ) {
-			return $ctx->get( 'props' ) ?? [];
-		}
-
-		if ( '$slots' === $name ) {
-			return $ctx->get( '$slots' ) ?? $ctx->get( 'slots' ) ?? [];
-		}
-
-		if ( '$context' === $name ) {
-			return $ctx->all();
-		}
-
 		$local = $ctx->get( $name );
 		if ( is_callable( $local ) ) {
 			return $local( ...$args );
