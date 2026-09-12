@@ -10,14 +10,11 @@ PHP 8.2 or newer with `mbstring`, and Composer 2.
 
 ## Installation
 
-Until the package is submitted to Packagist, configure its Git repository in your project:
+Install the stable release from [Packagist](https://packagist.org/packages/phpmystic/liqx):
 
 ```bash
-composer config repositories.liqx vcs https://github.com/mehdilight/liqx
-composer require phpmystic/liqx:dev-main
+composer require phpmystic/liqx:^0.1
 ```
-
-After a tagged release is available on Packagist, install with `composer require phpmystic/liqx`.
 
 ## Quick start
 
@@ -79,7 +76,7 @@ CI runs syntax checks, tests, and static analysis on PHP 8.2–8.5. Include a mi
 
 Versions are derived from Git tags; `composer.json` deliberately omits a version field, following [Packagist's versioning guidance](https://packagist.org/about#managing-package-versions).
 
-To publish the first release, confirm CI passes on `main`, create and push a semantic version tag, then submit `https://github.com/mehdilight/liqx` at [Packagist](https://packagist.org/packages/submit). Configure the GitHub integration to keep subsequent releases synchronized. Making the repository public does not automatically register the package on Packagist.
+To publish a release, confirm CI passes on `main`, then create and push a semantic version tag. Packagist indexes the tag as a package version. The GitHub integration keeps releases synchronized; maintainers can also trigger an update from the [package page](https://packagist.org/packages/phpmystic/liqx).
 
 ## License
 
