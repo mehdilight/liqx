@@ -388,9 +388,9 @@ final class Evaluator {
 			} elseif ( '*=' === $stmt->operator ) {
 				$ctx->set( $stmt->name, $this->toNumber( $ctx->get( $stmt->name ) ) * $this->toNumber( $val ) );
 			} elseif ( '/=' === $stmt->operator ) {
-				$ctx->set( $stmt->name, $this->divide( $this->toNumber( $ctx->get( $stmt->name ) ), $this->toNumber( $val ) ) );
+				$ctx->set( $stmt->name, $this->toNumber( $ctx->get( $stmt->name ) ) / $this->toNumber( $val ) );
 			} elseif ( '%=' === $stmt->operator ) {
-				$ctx->set( $stmt->name, $this->modulo( $this->toNumber( $ctx->get( $stmt->name ) ), $this->toNumber( $val ) ) );
+				$ctx->set( $stmt->name, $this->toNumber( $ctx->get( $stmt->name ) ) % $this->toNumber( $val ) );
 			}
 
 			return null;
@@ -416,23 +416,19 @@ final class Evaluator {
 
 		if ( $stmt instanceof FrontmatterSwitch ) {
 			$disc = $this->evaluate( $stmt->discriminant, $ctx );
-			$matched = false;
 
 			foreach ( $stmt->cases as $case ) {
 				if ( null !== $case['test'] ) {
 					$caseVal = $this->evaluate( $case['test'], $ctx );
 					if ( $this->looseEqual( $disc, $caseVal ) ) {
-						$matched = true;
 						return $this->evaluateStatements( $case['body'], $ctx );
 					}
 				}
 			}
 
-			if ( ! $matched ) {
-				foreach ( $stmt->cases as $case ) {
-					if ( null === $case['test'] ) {
-						return $this->evaluateStatements( $case['body'], $ctx );
-					}
+			foreach ( $stmt->cases as $case ) {
+				if ( null === $case['test'] ) {
+					return $this->evaluateStatements( $case['body'], $ctx );
 				}
 			}
 
@@ -477,6 +473,7 @@ final class Evaluator {
 		return null;
 	}
 
+	/** @param list<object> $stmts */
 	public function evaluateStatements( array $stmts, Context $ctx ): mixed {
 		foreach ( $stmts as $stmt ) {
 			$res = $this->evaluateStatement( $stmt, $ctx );
@@ -1055,11 +1052,11 @@ final class Evaluator {
 
 		if ( is_array( $props ) ) {
 			if ( null !== $name ) {
-				if ( isset( $props['slots'][ $name ] ) && '' !== $props['slots'][ $name ] && null !== $props['slots'][ $name ] ) {
+				if ( isset( $props['slots'][ $name ] ) && '' !== $props['slots'][ $name ] ) {
 					return (string) $props['slots'][ $name ];
 				}
 			} else {
-				if ( isset( $props['children'] ) && '' !== $props['children'] && null !== $props['children'] ) {
+				if ( isset( $props['children'] ) && '' !== $props['children'] ) {
 					return (string) $props['children'];
 				}
 			}

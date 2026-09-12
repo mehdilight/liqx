@@ -1,0 +1,11 @@
+/.gitattributes export-ignore
+/.github export-ignore
+/.gitignore export-ignore
+/.claude export-ignore
+/.retsu export-ignore
+/tests export-ignore
+/tools export-ignore
+/editors export-ignore
+/bench.php export-ignore
+/phpstan.neon export-ignore
+/phpunit.xml.dist export-ignore

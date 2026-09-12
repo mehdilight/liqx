@@ -8,7 +8,7 @@ use Phpmystic\Liqx\Node;
 
 final class Document implements Node {
 
-	/** @var list<Frontmatter|FrontmatterDestructure> */
+	/** @var list<object> */
 	public readonly array $frontmatter;
 
 	/** The frontmatter `return <expr>;` — exposed to the body as `props`. */

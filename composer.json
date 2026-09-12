@@ -1,7 +1,6 @@
 {
     "name": "phpmystic/liqx",
-    "version": "0.1.0",
-    "description": "A compiler-grounded JSX-flavored template engine for PHP. Keeps Liquid's section/schema/block model but swaps {{ }} / {% %} for real HTML + real JS-style { } expressions, with a restricted, sandboxed frontmatter subset.",
+    "description": "A JSX-style template engine for PHP with compiled rendering, components, schema validation, and restricted JavaScript-style expressions.",
     "type": "library",
     "license": "MIT",
     "require": {
@@ -30,7 +29,20 @@
     },
     "scripts": {
         "test": "phpunit",
-        "lint": "@php -r 'foreach (array_merge(glob(\"src/**/*.php\"), glob(\"tests/**/*.php\")) as $f) { exec(\"php -l \" . escapeshellarg($f) . \" 2>&1\", $o, $c); if ($c) { echo implode(PHP_EOL, $o), PHP_EOL; exit(1); } } echo \"lint clean\", PHP_EOL;'",
+        "lint": "@php tools/lint.php",
         "analyse": "phpstan analyse"
+    },
+    "keywords": [
+        "template",
+        "templating",
+        "jsx",
+        "liquid",
+        "compiler"
+    ],
+    "homepage": "https://github.com/mehdilight/liqx",
+    "support": {
+        "issues": "https://github.com/mehdilight/liqx/issues",
+        "source": "https://github.com/mehdilight/liqx",
+        "docs": "https://github.com/mehdilight/liqx/tree/main/docs/syntax"
     }
 }

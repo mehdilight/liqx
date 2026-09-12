@@ -32,6 +32,12 @@ final class FrontmatterStatementsTest extends TestCase {
 		return $interpreted;
 	}
 
+	public function testCompoundDivisionAndModulo(): void {
+		$source = "---\nlet value = 21;\nvalue /= 3;\nvalue %= 4;\n---\n<p>{value}</p>";
+
+		$this->assertSame( '<p>3</p>', trim( $this->render( $source ) ) );
+	}
+
 	// ---------------------------------------------------------------------
 	// Feature 1: if / else if / else in Frontmatter
 	// ---------------------------------------------------------------------

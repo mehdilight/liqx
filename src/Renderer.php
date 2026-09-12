@@ -786,6 +786,7 @@ final class Renderer {
 		return '';
 	}
 
+	/** @param list<string> $candidates */
 	private function evalConditionAttr( Element $element, Context $ctx, array $candidates = [ 'condition', 'cond', 'when', 'is' ] ): mixed {
 		foreach ( $element->attrs as $attr ) {
 			if ( null !== $attr['name'] && in_array( strtolower( $attr['name'] ), $candidates, true ) ) {

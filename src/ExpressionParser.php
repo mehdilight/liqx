@@ -158,9 +158,6 @@ final class ExpressionParser {
 			if ( $stmt instanceof FrontmatterReturn ) {
 				$return = $stmt->expr;
 				$declarations[] = $stmt;
-				if ( null !== $this->stream->acceptValue( TokenType::Operator, '}' ) ) {
-					break;
-				}
 				continue;
 			}
 
@@ -303,6 +300,7 @@ final class ExpressionParser {
 		return new FrontmatterSwitch( $discriminant, $cases, $line );
 	}
 
+	/** @return list<object> */
 	private function parseCaseStatements(): array {
 		$stmts = [];
 		while ( ! $this->stream->eof() ) {
@@ -357,6 +355,7 @@ final class ExpressionParser {
 		return new FrontmatterFunction( $name, $params, $body, null, $line );
 	}
 
+	/** @return list<object> */
 	private function parseBlockOrStatement(): array {
 		if ( null !== $this->stream->acceptValue( TokenType::Operator, '{' ) ) {
 			$stmts = [];

@@ -988,6 +988,7 @@ final class Compiler {
 		return $fallbackCode;
 	}
 
+	/** @param list<string> $candidates */
 	private function compileConditionAttr( Element $element, array $candidates = [ 'condition', 'cond', 'when', 'is' ] ): string {
 		foreach ( $element->attrs as $attr ) {
 			if ( null !== $attr['name'] && in_array( strtolower( $attr['name'] ), $candidates, true ) ) {
